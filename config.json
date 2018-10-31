@@ -1,0 +1,20 @@
+{
+  "quote": {
+    "interval": 1,
+    "quotes": [
+      "Quote 1",
+      "Quote 2",
+      "Quote 3"
+    ]
+  },
+  "greeting": {
+    "hello": "Hallo %USER%!",
+    "wb": "Willkommen zurück, %USER%!",
+    "custom": {
+      "Linus": {
+        "hello": "Guten Tag!",
+        "wb": "wb!"
+      }
+    }
+  }
+}
