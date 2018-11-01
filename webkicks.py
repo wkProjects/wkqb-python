@@ -1,4 +1,5 @@
 import re
+from threading import Timer
 from urllib.parse import urlparse
 
 import requests
@@ -12,15 +13,15 @@ import chatmessage
 class Webkicks:
     class Pattern:
         CHATMESSAGE = re.compile(
-            '<FONT SIZE=-2>\((.*?)\)</FONT> <b><font title="(.*?)">.*?(): (.*?)</font></td></tr></table>')
+            '<FONT SIZE=-2>\((.*?)\)</FONT> <b><font title="(.*?)">.*?: (.*?)</font></td></tr></table>')
         METEXT = re.compile(
-            '<FONT SIZE=-2>\((.*?)\)</FONT> <font title="(.*?)"><b><i><span onclick="fluester\(\'(?:.+)\'\)"><b>(.+)</b>\s*(.+)</i>')
+            '<FONT SIZE=-2>\((.*?)\)</FONT> <font title="(.*?)"><b><i><span onclick="fluester\(\'?:.+\'\)"><b>.+</b>\s*(.+)</i>')
         WHISPERMESSAGE = re.compile(
-            '<FONT SIZE=-2>\((.*?)\)</FONT> <b><span onclick="fluester\(\'(.*?)\'\)">.*? (fl&uuml;stert)</span>: <font color=red>(.*?)</font></td></tr></table>')
+            '<FONT SIZE=-2>\((.*?)\)</FONT> <b><span onclick="fluester\(\'(.*?)\'\)">.*? fl&uuml;stert</span>: <font color=red>(.*?)</font></td></tr></table>')
         CHATBOTMESSAGE = re.compile(
-            '<FONT SIZE=-2>\((.*?)\)</FONT> <font title=".*?"><b><font color="#FF0000">(Chat-Bot)():</font><span class="not_reg"> (.*?)</span></b></font></td></tr></table>')
+            '<FONT SIZE=-2>\((.*?)\)</FONT> <font title=".*?"><b><font color="#FF0000">(Chat-Bot):</font><span class="not_reg"> (.*?)</span></b></font></td></tr></table>')
         CHATBOTPM = re.compile(
-            '<FONT SIZE=-2>\((.*?)\)</FONT> <font title=".*?"><b><font color="#FF0000">(Chat-Bot-PM)():</font><span class="not_reg"> (.*?)</span></b></td></tr>')
+            '<FONT SIZE=-2>\((.*?)\)</FONT> <font title=".*?"><b><font color="#FF0000">(Chat-Bot-PM):</font><span class="not_reg"> (.*?)</span></b></td></tr>')
         LOGINMESSAGE = re.compile(
             '<FONT SIZE=-2>\((.*?)\)</FONT> <font title=".*?"><img src="/gruen.gif"><login ([^ ]+) />', re.IGNORECASE)
         CHANNELSWITCH = re.compile(
@@ -35,11 +36,22 @@ class Webkicks:
             '<table border=0><tr><td valign=bottom><br /><font title="WebKicks.De - Sysadmin"><b><font color="#FF0000">System-Meldung:</font><span class="not_reg"> Der Chat wird aufgrund des nächtlichen Wartungszyklus für ca 40 Sekunden ausfallen.</span></b><br /><br /></td></tr></table>')
         UPDATE = re.compile('<!-- update!* //-->')
 
-    def __init__(self, chat_url, username, password):
+    class Type:
+        CHATMESSAGE = 0
+        METEXT = 1
+        WHISPERMESSAGE = 2
+        LOGIN = 3
+        LOGOUT = 4
+        CHATBOT = 5
+        CHATBOTPM = 6
+        REBOOT = 7
+        UPDATE = 8
+
+    def __init__(self, chat_url, **kwargs):
         self.chat_url = chat_url
-        self.username = username
-        self.password = password
-        self.sid = self.sid_from_password(password)
+        self.username = kwargs.get("username")
+        self.password = kwargs.get("password")
+        self.sid = self.sid_from_password(self.password)
 
         chat_url_parts = urlparse(self.chat_url)
         self.cid = chat_url_parts.path.replace('/', '')
@@ -63,11 +75,15 @@ class Webkicks:
                                     "guest": ""})
 
     def logout(self):
-        self.send_message("/exit")
+        self.send_message(chatmessage.Outgoing("/exit"))
 
-    def send_message(self, message):
+    def send_message(self, message: chatmessage.Outgoing):
         self.http_client.post(self.send_url,
-                              data={"user": self.username, "pass": self.sid, "cid": self.cid, "message": message})
+                              data={"user": self.username, "pass": self.sid, "cid": self.cid,
+                                    "message": message.message})
+
+    def send_delayed(self, message: chatmessage.Outgoing, delay: int):
+        Timer(float(delay), self.send_message, [message]).start()
 
     def get_stream_url(self):
         stream_frame = self.http_client.get(self.stream_frame_url)
@@ -86,20 +102,22 @@ class Webkicks:
     def parse_message(self, message):
         chat_message = None
         m = REMatcher.REMatcher(message)
-        if m.search(Webkicks.Pattern.UPDATE):
-            pass
-        elif m.search(Webkicks.Pattern.LOGINMESSAGE):
-            chat_message = chatmessage.Message(m.group(2), "")
-            chat_message.type = "Login"
+
+        if m.search(Webkicks.Pattern.LOGINMESSAGE):
+            chat_message = chatmessage.Incoming(m.group(2), "")
+            chat_message.type = self.Type.LOGIN
         elif m.search(Webkicks.Pattern.LOGOUTMESSAGE):
-            chat_message = chatmessage.Message(m.group(2), "")
-            chat_message.type = "Logout"
+            chat_message = chatmessage.Incoming(m.group(2), "")
+            chat_message.type = self.Type.LOGOUT
         elif m.search(Webkicks.Pattern.CHATMESSAGE):
-            chat_message = chatmessage.Message(m.group(2), m.group(4))
+            chat_message = chatmessage.Incoming(m.group(2), m.group(3))
             print("Normal: " + str(chat_message))
         elif m.search(Webkicks.Pattern.WHISPERMESSAGE):
-            chat_message = chatmessage.Message(m.group(2), m.group(4))
+            chat_message = chatmessage.Incoming(m.group(2), m.group(3))
             print("Geflüstert: " + str(chat_message))
+        elif m.search(Webkicks.Pattern.UPDATE):
+            # skipping update messages
+            pass
         else:
             print(message)
         return chat_message
