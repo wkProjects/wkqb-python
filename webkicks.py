@@ -6,8 +6,8 @@ import requests
 import schedule
 from passlib.hash import des_crypt
 
-import REMatcher
 import chatmessage
+import rematcher
 
 
 class Webkicks:
@@ -101,7 +101,7 @@ class Webkicks:
 
     def parse_message(self, message):
         chat_message = None
-        m = REMatcher.REMatcher(message)
+        m = rematcher.REMatcher(message)
 
         if m.search(Webkicks.Pattern.LOGINMESSAGE):
             chat_message = chatmessage.Incoming(m.group(2), "")
