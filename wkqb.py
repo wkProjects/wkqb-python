@@ -82,7 +82,9 @@ class WKQB:
 
                 elif command.cmd == Command.Commands.RELOAD:
                     if self.is_mod(chat_message.user):
-                        self.load_settings()
+                        self.config = self.load_settings()
+                        schedule.clear("quotes")
+                        self.schedule_quotes()
                         self.webkicks.send_message(Outgoing("Einstellungen neu geladen!"))
 
                 elif command.cmd == Command.Commands.QUIT:
@@ -166,7 +168,7 @@ class WKQB:
             return self.config.greeting
 
     def schedule_quotes(self):
-        schedule.every(self.config.quote.interval).minutes.do(self.send_random_quote)
+        schedule.every(self.config.quote.interval).minutes.do(self.send_random_quote).tag("quotes")
 
     def is_ignored(self, username):
         return username in self.config.users.ignored
@@ -181,7 +183,7 @@ class WKQB:
         return username == self.config.users.master
 
     def load_settings(self):
-        return json.load(open("config.json", "r"), object_hook=Generic.from_dict)
+        return json.load(open("config.json", "r", encoding="utf-8"), object_hook=Generic.from_dict)
 
     @staticmethod
     def event_loop():
