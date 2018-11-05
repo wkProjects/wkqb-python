@@ -76,10 +76,6 @@ class WKQB:
                 if command.cmd == Command.Commands.PING:
                     self.webkicks.send_message(Outgoing("Pong!"))
 
-                elif command.cmd == Command.Commands.WAIT:
-                    delay = int(command.param_string) if command.param_string is not None else 3
-                    self.webkicks.send_delayed(Outgoing("Habe gewartet!"), delay)
-
                 elif command.cmd == Command.Commands.SAY:
                     if self.is_admin(chat_message.user):
                         self.webkicks.send_message(Outgoing(command.param_string))
@@ -92,6 +88,27 @@ class WKQB:
                 elif command.cmd == Command.Commands.QUIT:
                     if self.is_admin(chat_message.user):
                         self.webkicks.send_message(Outgoing("/exit"))
+
+                elif command.cmd == Command.Commands.MASTER:
+                    self.webkicks.send_message(Outgoing("Master: " + self.config.users.master))
+
+                elif command.cmd == Command.Commands.ADMINS:
+                    if len(self.config.users.admins) > 0:
+                        self.webkicks.send_message(Outgoing("Admins: " + str.join(", ", self.config.users.admins)))
+                    else:
+                        self.webkicks.send_message(Outgoing("Es gibt keine Admins :-("))
+
+                elif command.cmd == Command.Commands.MODS:
+                    if len(self.config.users.mods) > 0:
+                        self.webkicks.send_message(Outgoing("Admins: " + str.join(", ", self.config.users.mods)))
+                    else:
+                        self.webkicks.send_message(Outgoing("Es gibt keine Mods :-("))
+
+                elif command.cmd == Command.Commands.IGNORED:
+                    if len(self.config.users.ignored) > 0:
+                        self.webkicks.send_message(Outgoing("Ignoriert: " + str.join(", ", self.config.users.ignored)))
+                    else:
+                        self.webkicks.send_message(Outgoing("Niemand wird ignoriert :-)"))
 
                 elif command.cmd == Command.Commands.QUOTE:
                     if command.param_string:

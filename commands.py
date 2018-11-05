@@ -6,6 +6,10 @@ class Command:
         QUOTE = "quote"
         RELOAD = "reload"
         QUIT = "quit"
+        MASTER = "master"
+        ADMINS = "admins"
+        MODS = "mods"
+        IGNORED = "ignored"
 
     def __init__(self, cmd, param_string=""):
         self.cmd = cmd
