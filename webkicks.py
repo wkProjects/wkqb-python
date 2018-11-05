@@ -104,6 +104,7 @@ class Webkicks:
 
     def parse_message(self, message):
         chat_message = None
+        message = Webkicks.Pattern.REPLACER.sub(r':\1', message)
         m = rematcher.REMatcher(message)
 
         if m.search(Webkicks.Pattern.LOGINMESSAGE):
