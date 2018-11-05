@@ -34,8 +34,7 @@ class WKQB:
         if stream.encoding is None:
             stream.encoding = 'utf-8'
 
-        # we prepare a stop signal for our event loop, so the bot can exit
-        ev_loop_stop = threading.Event()
+        # now we listen for chat messages, as long as the stream is open
         for line in stream.iter_lines(decode_unicode=True):
             if line:
                 if self.webkicks.Pattern.UPDATE.match(line) and not chat_started:
@@ -45,7 +44,7 @@ class WKQB:
                     self.schedule_quotes()
 
                     # starting the event loop in a separate thread
-                    ev_loop = threading.Thread(target=self.event_loop, args=[ev_loop_stop])
+                    ev_loop = threading.Thread(target=self.event_loop, daemon=True)
                     ev_loop.start()
 
                     chat_started = True
@@ -53,8 +52,8 @@ class WKQB:
                     chat_message = self.webkicks.parse_message(line)
                     self.handle_message(chat_message)
 
-        # stop the event loop so we can exit
-        ev_loop_stop.set()
+        # stream is closed, time to cleanup
+        pass
 
     def handle_message(self, chat_message):
         if chat_message:
@@ -168,7 +167,7 @@ class WKQB:
         return json.load(open("config.json", "r"), object_hook=Generic.from_dict)
 
     @staticmethod
-    def event_loop(stop_event):
-        while not stop_event.is_set():
+    def event_loop():
+        while True:
             schedule.run_pending()
-            stop_event.wait(timeout=1)
+            time.sleep(1)
