@@ -1,3 +1,4 @@
+import logging
 import re
 from threading import Timer
 from urllib.parse import urlparse
@@ -8,6 +9,8 @@ from passlib.hash import des_crypt
 
 import chatmessage
 import rematcher
+
+logger = logging.getLogger(__name__)
 
 
 class Webkicks:
@@ -115,10 +118,10 @@ class Webkicks:
             chat_message.type = self.Type.LOGOUT
         elif m.search(Webkicks.Pattern.CHATMESSAGE):
             chat_message = chatmessage.Incoming(m.group(2), m.group(3))
-            print("Normal: " + str(chat_message))
+            logger.debug("Normal: " + str(chat_message))
         elif m.search(Webkicks.Pattern.WHISPERMESSAGE):
             chat_message = chatmessage.Incoming(m.group(2), m.group(3))
-            print("Geflüstert: " + str(chat_message))
+            logger.debug("Geflüstert: " + str(chat_message))
         elif m.search(Webkicks.Pattern.UPDATE):
             # skipping update messages
             pass
@@ -126,5 +129,5 @@ class Webkicks:
             # also skipping soundcontainer
             pass
         else:
-            print(message)
+            logger.debug(message)
         return chat_message

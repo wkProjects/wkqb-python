@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import random
 import signal
@@ -12,8 +13,10 @@ from commands import Command
 from config import Generic
 from webkicks import Webkicks
 
+logger = logging.getLogger(__name__)
 
 class WKQB:
+
     def __init__(self):
         self.webkicks = Webkicks(os.environ.get("WK_CHATURL"), username=os.environ.get("WK_USERNAME"),
                                  password=os.environ.get("WK_PASSWORD"))
@@ -38,7 +41,7 @@ class WKQB:
         for line in stream.iter_lines(decode_unicode=True):
             if line:
                 if self.webkicks.Pattern.UPDATE.match(line) and not chat_started:
-                    print("Chat initialized: " + time.strftime("%a, %d %b %Y %H:%M:%S"))
+                    logger.info("Chat initialized: " + time.strftime("%a, %d %b %Y %H:%M:%S"))
 
                     # here we can initialize some things, cause we got the first chat message
                     self.schedule_quotes()
@@ -64,7 +67,7 @@ class WKQB:
                 # we also ignore ignored users, obviously
                 return
             if chat_message.type == Webkicks.Type.LOGIN:
-                print(chat_message.user + " logged in!")
+                logger.debug(chat_message.user + " logged in!")
                 self.handle_user_login(chat_message.user)
 
             elif chat_message.type == Webkicks.Type.LOGOUT:
