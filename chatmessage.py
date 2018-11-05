@@ -32,8 +32,8 @@ class Outgoing:
         self.message = message
         self.message = self.replace_tokens(message, replacements)
 
-    def replace_tokens(self, message: str, replacements: Dict[str, str]):
+    def replace_tokens(self, message: str, replacements: Dict[str, any]):
         for k, v in replacements.items():
             pattern = re.compile(re.escape("%" + k + "%"), re.IGNORECASE)
-            message = pattern.sub(v, message)
+            message = pattern.sub(str(v), message)
         return message

@@ -27,5 +27,11 @@
     ],
     "mods": [],
     "ignored": []
+  },
+  "commands": {
+    "test": "Hallo!",
+    "random": "%RANDOM%%NEW%%RANDOM%",
+    "param": "%PARAM%",
+    "user": "%USER%"
   }
 }

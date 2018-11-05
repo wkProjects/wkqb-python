@@ -36,6 +36,8 @@ class Webkicks:
             '<table border=0><tr><td valign=bottom><br /><font title="WebKicks.De - Sysadmin"><b><font color="#FF0000">System-Meldung:</font><span class="not_reg"> Der Chat wird aufgrund des nächtlichen Wartungszyklus für ca 40 Sekunden ausfallen.</span></b><br /><br /></td></tr></table>')
         UPDATE = re.compile('<!-- update!* //-->')
         SOUNDCONTAINER = re.compile('<div id="soundcontainer"></div>')
+        LOGOUT = re.compile(
+            '<script language="JavaScript">window.location.replace("https://server\d.webkicks.de/[a-zA-Z_-]+/logout");</script>')
 
     class Type:
         CHATMESSAGE = 0

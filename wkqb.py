@@ -2,8 +2,8 @@ import json
 import os
 import random
 import signal
+import threading
 import time
-from threading import Thread
 
 import schedule
 
@@ -17,7 +17,7 @@ class WKQB:
     def __init__(self):
         self.webkicks = Webkicks(os.environ.get("WK_CHATURL"), username=os.environ.get("WK_USERNAME"),
                                  password=os.environ.get("WK_PASSWORD"))
-        self.config = json.load(open("config.json", "r"), object_hook=Generic.from_dict)
+        self.config = self.load_settings()
         self.user_list = {}
         signal.signal(signal.SIGINT, self.webkicks.logout)
         signal.signal(signal.SIGTERM, self.webkicks.logout)
@@ -34,6 +34,8 @@ class WKQB:
         if stream.encoding is None:
             stream.encoding = 'utf-8'
 
+        # we prepare a stop signal for our event loop, so the bot can exit
+        ev_loop_stop = threading.Event()
         for line in stream.iter_lines(decode_unicode=True):
             if line:
                 if self.webkicks.Pattern.UPDATE.match(line) and not chat_started:
@@ -43,56 +45,82 @@ class WKQB:
                     self.schedule_quotes()
 
                     # starting the event loop in a separate thread
-                    ev_loop = Thread(target=self.event_loop)
+                    ev_loop = threading.Thread(target=self.event_loop, args=[ev_loop_stop])
                     ev_loop.start()
 
                     chat_started = True
                 if chat_started:
                     chat_message = self.webkicks.parse_message(line)
-                    if chat_message:
-                        if chat_message.user == self.webkicks.username:
-                            # we dont want to react to our own messages
-                            continue
+                    self.handle_message(chat_message)
 
-                        if chat_message.type == Webkicks.Type.LOGIN:
-                            print(chat_message.user + " logged in!")
-                            self.handle_user_login(chat_message.user)
+        # stop the event loop so we can exit
+        ev_loop_stop.set()
 
-                        elif chat_message.type == Webkicks.Type.LOGOUT:
-                            # we dont handle logouts for now
-                            pass
-                        elif chat_message.has_command():
+    def handle_message(self, chat_message):
+        if chat_message:
+            if chat_message.user == self.webkicks.username:
+                # we dont want to react to our own messages
+                return
+            if self.is_ignored(chat_message.user):
+                # we also ignore ignored users, obviously
+                return
+            if chat_message.type == Webkicks.Type.LOGIN:
+                print(chat_message.user + " logged in!")
+                self.handle_user_login(chat_message.user)
 
-                            command = chat_message.get_command()
-                            if command.cmd == Command.Commands.PING:
-                                self.webkicks.send_message(Outgoing("Pong!"))
+            elif chat_message.type == Webkicks.Type.LOGOUT:
+                # we dont handle logouts for now
+                pass
+            elif chat_message.has_command():
 
-                            elif command.cmd == Command.Commands.WAIT:
-                                delay = int(command.param_string) if command.param_string is not None else 3
-                                self.webkicks.send_delayed(Outgoing("Habe gewartet!"), delay)
+                command = chat_message.get_command()
+                if command.cmd == Command.Commands.PING:
+                    self.webkicks.send_message(Outgoing("Pong!"))
 
-                            elif command.cmd == Command.Commands.SAY:
-                                self.webkicks.send_message(Outgoing(command.param_string))
+                elif command.cmd == Command.Commands.WAIT:
+                    delay = int(command.param_string) if command.param_string is not None else 3
+                    self.webkicks.send_delayed(Outgoing("Habe gewartet!"), delay)
 
-                            elif command.cmd == Command.Commands.QUOTE:
-                                if command.param_string:
-                                    if command.param_string.isdigit():
-                                        index = max(1, int(command.param_string)) - 1
-                                        if index > len(self.config.quote.quotes):
-                                            self.webkicks.send_message(Outgoing("So viele Zitate habe ich nicht :-("))
-                                        else:
-                                            self.webkicks.send_message(
-                                                Outgoing(self.config.quote.quotes[index]))
-                                    else:
-                                        filtered_quotes = [quote for quote in self.config.quote.quotes if
-                                                           quote.lower().find(command.param_string.lower()) != -1]
-                                        if len(filtered_quotes) == 0:
-                                            self.webkicks.send_message(
-                                                Outgoing("Kein Zitat mit '" + command.param_string + "' gefunden :-("))
-                                        else:
-                                            self.webkicks.send_message(Outgoing(random.choice(filtered_quotes)))
-                                else:
-                                    self.send_random_quote()
+                elif command.cmd == Command.Commands.SAY:
+                    if self.is_admin(chat_message.user):
+                        self.webkicks.send_message(Outgoing(command.param_string))
+
+                elif command.cmd == Command.Commands.RELOAD:
+                    if self.is_mod(chat_message.user):
+                        self.load_settings()
+                        self.webkicks.send_message(Outgoing("Einstellungen neu geladen!"))
+
+                elif command.cmd == Command.Commands.QUIT:
+                    if self.is_admin(chat_message.user):
+                        self.webkicks.send_message(Outgoing("/exit"))
+
+                elif command.cmd == Command.Commands.QUOTE:
+                    if command.param_string:
+                        if command.param_string.isdigit():
+                            index = max(1, int(command.param_string)) - 1
+                            if index > len(self.config.quote.quotes):
+                                self.webkicks.send_message(Outgoing("So viele Zitate habe ich nicht :-("))
+                            else:
+                                self.webkicks.send_message(
+                                    Outgoing(self.config.quote.quotes[index]))
+                        else:
+                            filtered_quotes = [quote for quote in self.config.quote.quotes if
+                                               quote.lower().find(command.param_string.lower()) != -1]
+                            if len(filtered_quotes) == 0:
+                                self.webkicks.send_message(
+                                    Outgoing("Kein Zitat mit '" + command.param_string + "' gefunden :-("))
+                            else:
+                                self.webkicks.send_message(Outgoing(random.choice(filtered_quotes)))
+                    else:
+                        self.send_random_quote()
+
+                elif hasattr(self.config.commands, command.cmd):
+                    response = getattr(self.config.commands, command.cmd)
+                    parts = response.split("%NEW%")
+                    for part in parts:
+                        self.webkicks.send_message(
+                            Outgoing(part, replacements={"user": chat_message.user, "random": random.random(),
+                                                         "param": command.param_string}))
 
     def handle_user_login(self, username):
         # is there a special greeting config for the user?
@@ -124,7 +152,23 @@ class WKQB:
     def schedule_quotes(self):
         schedule.every(self.config.quote.interval).minutes.do(self.send_random_quote)
 
-    def event_loop(self):
-        while True:
+    def is_ignored(self, username):
+        return username in self.config.users.ignored
+
+    def is_mod(self, username):
+        return self.is_admin(username) or username in self.config.users.mods
+
+    def is_admin(self, username):
+        return self.is_master(username) or username in self.config.users.admins
+
+    def is_master(self, username):
+        return username == self.config.users.master
+
+    def load_settings(self):
+        return json.load(open("config.json", "r"), object_hook=Generic.from_dict)
+
+    @staticmethod
+    def event_loop(stop_event):
+        while not stop_event.is_set():
             schedule.run_pending()
-            time.sleep(1)
+            stop_event.wait(timeout=1)

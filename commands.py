@@ -4,6 +4,8 @@ class Command:
         WAIT = "wait"
         SAY = "say"
         QUOTE = "quote"
+        RELOAD = "reload"
+        QUIT = "quit"
 
     def __init__(self, cmd, param_string=""):
         self.cmd = cmd
