@@ -19,8 +19,8 @@ class WKQB:
                                  password=os.environ.get("WK_PASSWORD"))
         self.config = self.load_settings()
         self.user_list = {}
-        signal.signal(signal.SIGINT, self.webkicks.logout)
-        signal.signal(signal.SIGTERM, self.webkicks.logout)
+        signal.signal(signal.SIGINT, self.stop_bot)
+        signal.signal(signal.SIGTERM, self.stop_bot)
 
     def run(self):
 
@@ -184,6 +184,9 @@ class WKQB:
 
     def load_settings(self):
         return json.load(open("config.json", "r", encoding="utf-8"), object_hook=Generic.from_dict)
+
+    def stop_bot(self, signal, frame):
+        self.webkicks.logout()
 
     @staticmethod
     def event_loop():
