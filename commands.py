@@ -3,6 +3,7 @@ class Command:
         PING = "ping"
         WAIT = "wait"
         SAY = "say"
+        QUOTE = "quote"
 
     def __init__(self, cmd, param_string=""):
         self.cmd = cmd

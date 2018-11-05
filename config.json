@@ -4,7 +4,10 @@
     "quotes": [
       "Quote 1",
       "Quote 2",
-      "Quote 3"
+      "Quote 3",
+      "Hund",
+      "Katze",
+      "Maus"
     ]
   },
   "greeting": {
@@ -16,5 +19,13 @@
         "wb": "wb!"
       }
     }
+  },
+  "users": {
+    "master": "Linus",
+    "admins": [
+      "wkQB"
+    ],
+    "mods": [],
+    "ignored": []
   }
 }

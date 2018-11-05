@@ -35,6 +35,7 @@ class Webkicks:
         REBOOT = re.compile(
             '<table border=0><tr><td valign=bottom><br /><font title="WebKicks.De - Sysadmin"><b><font color="#FF0000">System-Meldung:</font><span class="not_reg"> Der Chat wird aufgrund des nächtlichen Wartungszyklus für ca 40 Sekunden ausfallen.</span></b><br /><br /></td></tr></table>')
         UPDATE = re.compile('<!-- update!* //-->')
+        SOUNDCONTAINER = re.compile('<div id="soundcontainer"></div>')
 
     class Type:
         CHATMESSAGE = 0
@@ -80,7 +81,7 @@ class Webkicks:
     def send_message(self, message: chatmessage.Outgoing):
         self.http_client.post(self.send_url,
                               data={"user": self.username, "pass": self.sid, "cid": self.cid,
-                                    "message": message.message})
+                                    "message": message.message.encode("iso-8859-1", "replace")})
 
     def send_delayed(self, message: chatmessage.Outgoing, delay: int):
         Timer(float(delay), self.send_message, [message]).start()
@@ -117,6 +118,9 @@ class Webkicks:
             print("Geflüstert: " + str(chat_message))
         elif m.search(Webkicks.Pattern.UPDATE):
             # skipping update messages
+            pass
+        elif m.search(Webkicks.Pattern.SOUNDCONTAINER):
+            # also skipping soundcontainer
             pass
         else:
             print(message)
