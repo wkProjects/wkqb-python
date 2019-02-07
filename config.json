@@ -33,5 +33,10 @@
     "random": "%RANDOM%%NEW%%RANDOM%",
     "param": "%PARAM%",
     "user": "%USER%"
+  },
+  "ki": {
+    "suchwort": "reaktion",
+    "\\d{2}": "reaktion 2",
+    "\\d{3}": "reaktion 3"
   }
 }

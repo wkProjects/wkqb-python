@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import random
+import re
 import signal
 import threading
 import time
@@ -14,6 +15,7 @@ from config import Generic
 from webkicks import Webkicks
 
 logger = logging.getLogger(__name__)
+
 
 class WKQB:
 
@@ -92,6 +94,7 @@ class WKQB:
 
                 elif command.cmd == Command.Commands.QUIT:
                     if self.is_admin(chat_message.user):
+                        self.webkicks.send_message(Outgoing("Oh je, ich muss wohl gehen :-("))
                         self.webkicks.send_message(Outgoing("/exit"))
 
                 elif command.cmd == Command.Commands.MASTER:
@@ -142,6 +145,12 @@ class WKQB:
                         self.webkicks.send_message(
                             Outgoing(part, replacements={"user": chat_message.user, "random": random.random(),
                                                          "param": command.param_string}))
+            else:
+                for pattern, reaction in self.config.ki.__dict__.items():
+                    if re.search(pattern, chat_message.message):
+                        self.webkicks.send_message(
+                            Outgoing(reaction, replacements={"user": chat_message.user, "random": random.random()}))
+                pass
 
     def handle_user_login(self, username):
         # is there a special greeting config for the user?
