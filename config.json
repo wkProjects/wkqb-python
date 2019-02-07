@@ -34,9 +34,36 @@
     "param": "%PARAM%",
     "user": "%USER%"
   },
-  "ki": {
-    "suchwort": "reaktion",
-    "\\d{2}": "reaktion 2",
-    "\\d{3}": "reaktion 3"
+  "pattern": {
+    "list": [
+      {
+        "type": "plain",
+        "pattern": "suchwort",
+        "reaction": "reaction 1",
+        "needs_bot_name": false,
+        "guest_reaction": true
+      },
+      {
+        "type": "regex",
+        "pattern": "\\d{3}",
+        "reaction": "reaktion 2",
+        "needs_bot_name": true,
+        "guest_reaction": true
+      },
+      {
+        "type": "plain",
+        "pattern": "such\\wort",
+        "reaction": "reaktion 3",
+        "needs_bot_name": false,
+        "guest_reaction": true
+      },
+      {
+        "type": "regex",
+        "pattern": "such\\wort",
+        "reaction": "reaction 4",
+        "needs_bot_name": true,
+        "guest_reaction": false
+      }
+    ]
   }
 }

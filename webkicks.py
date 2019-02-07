@@ -125,6 +125,7 @@ class Webkicks:
             logger.debug("Geflüstert: " + str(chat_message))
         elif m.search(Webkicks.Pattern.COMMENT):
             chat_message = chatmessage.Incoming(m.group(2), m.group(3))
+            logger.debug("Comment: " + str(chat_message))
         elif m.search(Webkicks.Pattern.UPDATE):
             # skipping update messages
             pass

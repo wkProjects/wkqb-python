@@ -11,6 +11,7 @@ class Incoming:
         self.user = user
         self.message = message
         self.type = None
+        self.from_guest = True if "(Gast)" in self.user else False
 
     def __str__(self):
         return "(" + strftime("%a, %d %b %Y %H:%M:%S", localtime(self.time)) + ") " + self.user + ": " + self.message

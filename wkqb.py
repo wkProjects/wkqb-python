@@ -146,11 +146,14 @@ class WKQB:
                             Outgoing(part, replacements={"user": chat_message.user, "random": random.random(),
                                                          "param": command.param_string}))
             else:
-                for pattern, reaction in self.config.ki.__dict__.items():
-                    if re.search(pattern, chat_message.message):
-                        self.webkicks.send_message(
-                            Outgoing(reaction, replacements={"user": chat_message.user, "random": random.random()}))
-                pass
+                for entry in self.config.pattern.list:
+                    if entry.guest_reaction or not chat_message.from_guest:
+                        if (entry.type == 'regex' and re.search(entry.pattern, chat_message.message)) or (
+                                entry.type == 'plain' and entry.pattern in chat_message.message):
+                            if not entry.needs_bot_name or re.search(r"\b" + self.webkicks.username.lower() + r"\b", chat_message.message.lower()):
+                                self.webkicks.send_message(
+                                    Outgoing(entry.reaction,
+                                             replacements={"user": chat_message.user, "random": random.random()}))
 
     def handle_user_login(self, username):
         # is there a special greeting config for the user?
