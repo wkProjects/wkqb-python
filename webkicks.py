@@ -87,7 +87,7 @@ class Webkicks:
 
     def send_message(self, message: chatmessage.Outgoing):
         # to support sending multiple messages we make sure that we have a list, even if it only contains one element
-        messages = [message.message] if isinstance(message.message, list) else message.message
+        messages = message.message if isinstance(message.message, list) else [message.message]
 
         for message in messages:
             self.http_client.post(self.send_url,
