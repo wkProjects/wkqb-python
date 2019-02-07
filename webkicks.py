@@ -41,6 +41,7 @@ class Webkicks:
         SOUNDCONTAINER = re.compile('<div id="soundcontainer"></div>')
         LOGOUT = re.compile(
             '<script language="JavaScript">window.location.replace("https://server\d.webkicks.de/[a-zA-Z_-]+/logout");</script>')
+        COMMENT = re.compile('<FONT SIZE=-2>\((.*?)\)</FONT> <img src="/pfeilg.gif"> <font title="(.*?)"><b><span class="not_reg"> (.*?)</span></b></td></tr></table>')
 
     class Type:
         CHATMESSAGE = 0
@@ -122,6 +123,8 @@ class Webkicks:
         elif m.search(Webkicks.Pattern.WHISPERMESSAGE):
             chat_message = chatmessage.Incoming(m.group(2), m.group(3))
             logger.debug("Geflüstert: " + str(chat_message))
+        elif m.search(Webkicks.Pattern.COMMENT):
+            chat_message = chatmessage.Incoming(m.group(2), m.group(3))
         elif m.search(Webkicks.Pattern.UPDATE):
             # skipping update messages
             pass
