@@ -76,7 +76,7 @@ class WKQB:
                 # we dont handle logouts for now
                 pass
             elif chat_message.has_command():
-
+                # first we handle system commands, as they have to always work
                 command = chat_message.get_command()
                 if command.cmd == Command.Commands.PING:
                     self.webkicks.send_message(Outgoing("Pong!"))
@@ -139,18 +139,18 @@ class WKQB:
                         self.send_random_quote()
 
                 elif hasattr(self.config.commands, command.cmd):
-                    response = getattr(self.config.commands, command.cmd)
-                    parts = response.split("%NEW%")
-                    for part in parts:
-                        self.webkicks.send_message(
-                            Outgoing(part, replacements={"user": chat_message.user, "random": random.random(),
-                                                         "param": command.param_string}))
+                    # here we handle custom commands
+                    self.webkicks.send_message(
+                        Outgoing(getattr(self.config.commands, command.cmd), replacements={"user": chat_message.user,
+                                                                                           "param": command.param_string}))
             else:
+                # no we do the pattern matching, based on the conditions provided
                 for entry in self.config.pattern.list:
                     if entry.guest_reaction or not chat_message.from_guest:
                         if (entry.type == 'regex' and re.search(entry.pattern, chat_message.message)) or (
                                 entry.type == 'plain' and entry.pattern in chat_message.message):
-                            if not entry.needs_bot_name or re.search(r"\b" + self.webkicks.username.lower() + r"\b", chat_message.message.lower()):
+                            if not entry.needs_bot_name or re.search(r"\b" + self.webkicks.username.lower() + r"\b",
+                                                                     chat_message.message.lower()):
                                 self.webkicks.send_message(
                                     Outgoing(entry.reaction,
                                              replacements={"user": chat_message.user, "random": random.random()}))

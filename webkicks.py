@@ -41,7 +41,8 @@ class Webkicks:
         SOUNDCONTAINER = re.compile('<div id="soundcontainer"></div>')
         LOGOUT = re.compile(
             '<script language="JavaScript">window.location.replace("https://server\d.webkicks.de/[a-zA-Z_-]+/logout");</script>')
-        COMMENT = re.compile('<FONT SIZE=-2>\((.*?)\)</FONT> <img src="/pfeilg.gif"> <font title="(.*?)"><b><span class="not_reg"> (.*?)</span></b></td></tr></table>')
+        COMMENT = re.compile(
+            '<FONT SIZE=-2>\((.*?)\)</FONT> <img src="/pfeilg.gif"> <font title="(.*?)"><b><span class="not_reg"> (.*?)</span></b></td></tr></table>')
 
     class Type:
         CHATMESSAGE = 0
@@ -85,9 +86,13 @@ class Webkicks:
         self.send_message(chatmessage.Outgoing("/exit"))
 
     def send_message(self, message: chatmessage.Outgoing):
-        self.http_client.post(self.send_url,
-                              data={"user": self.username, "pass": self.sid, "cid": self.cid,
-                                    "message": message.message.encode("iso-8859-1", "replace")})
+        # to support sending multiple messages we make sure that we have a list, even if it only contains one element
+        messages = [message.message] if isinstance(message.message, list) else message.message
+
+        for message in messages:
+            self.http_client.post(self.send_url,
+                                  data={"user": self.username, "pass": self.sid, "cid": self.cid,
+                                        "message": message.encode("iso-8859-1", "replace")})
 
     def send_delayed(self, message: chatmessage.Outgoing, delay: int):
         Timer(float(delay), self.send_message, [message]).start()

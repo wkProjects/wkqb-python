@@ -1,3 +1,4 @@
+import random
 import re
 from time import time, localtime, strftime
 from typing import Dict
@@ -30,10 +31,18 @@ class Outgoing:
     def __init__(self, message, replacements=None):
         if replacements is None:
             replacements = {}
-        self.message = message
-        self.message = self.replace_tokens(message, replacements)
 
-    def replace_tokens(self, message: str, replacements: Dict[str, any]):
+        # in case we have a list of messages to send we need to replace tokens in all of them, so we do just that
+        if isinstance(message, list):
+            self.message = [self.replace_tokens(msg, replacements) for msg in message]
+        else:
+            self.message = self.replace_tokens(message, replacements)
+
+    def replace_tokens(self, message, replacements: Dict[str, any]):
+        # the %RANDOM% token has to be handled specially, as it wouldn't be random otherwise
+        message = re.sub('%RANDOM%', str(random.random()), message, 0, re.IGNORECASE)
+
+        # now we can replace the "normal" tokens
         for k, v in replacements.items():
             pattern = re.compile(re.escape("%" + k + "%"), re.IGNORECASE)
             message = pattern.sub(str(v), message)

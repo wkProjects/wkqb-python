@@ -30,7 +30,7 @@
   },
   "commands": {
     "test": "Hallo!",
-    "random": "%RANDOM%%NEW%%RANDOM%",
+    "random": ["%RANDOM%", "%RANDOM%"],
     "param": "%PARAM%",
     "user": "%USER%"
   },
@@ -60,7 +60,7 @@
       {
         "type": "regex",
         "pattern": "such\\wort",
-        "reaction": "reaction 4",
+        "reaction": ["reaction 4", "zweite nachricht! %RANDOM%"],
         "needs_bot_name": true,
         "guest_reaction": false
       }
