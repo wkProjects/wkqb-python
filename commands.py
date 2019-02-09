@@ -11,6 +11,8 @@ class Command:
         MODS = "mods"
         IGNORED = "ignored"
 
+        HANGMAN = "hangman"
+
     def __init__(self, cmd, param_string=""):
         self.cmd = cmd
         self.param_string = param_string

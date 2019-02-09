@@ -1,6 +1,6 @@
 {
   "quote": {
-    "interval": 1,
+    "interval": 15,
     "quotes": [
       "Quote 1",
       "Quote 2",
@@ -30,7 +30,10 @@
   },
   "commands": {
     "test": "Hallo!",
-    "random": ["%RANDOM%", "%RANDOM%"],
+    "random": [
+      "%RANDOM%",
+      "%RANDOM%"
+    ],
     "param": "%PARAM%",
     "user": "%USER%"
   },
@@ -60,10 +63,21 @@
       {
         "type": "regex",
         "pattern": "such\\wort",
-        "reaction": ["reaction 4", "zweite nachricht! %RANDOM%"],
+        "reaction": [
+          "reaction 4",
+          "zweite nachricht! %RANDOM%"
+        ],
         "needs_bot_name": true,
         "guest_reaction": false
       }
+    ]
+  },
+  "hangman": {
+    "show_solution": true,
+    "words": [
+      "Fisch",
+      "Fleisch",
+      "Gemüse"
     ]
   }
 }

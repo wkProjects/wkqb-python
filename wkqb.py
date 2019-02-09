@@ -12,6 +12,7 @@ import schedule
 from chatmessage import Outgoing
 from commands import Command
 from config import Generic
+from games import Hangman
 from webkicks import Webkicks
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ class WKQB:
                                  password=os.environ.get("WK_PASSWORD"))
         self.config = self.load_settings()
         self.user_list = {}
+        self.hangman = None
         signal.signal(signal.SIGHUP, self.handle_signal)
         signal.signal(signal.SIGINT, self.handle_signal)
         signal.signal(signal.SIGTERM, self.handle_signal)
@@ -139,6 +141,20 @@ class WKQB:
                     else:
                         self.send_random_quote()
 
+                elif command.cmd == Command.Commands.HANGMAN:
+                    logger.debug(command.param_string)
+                    if not self.hangman:
+                        self.hangman = Hangman(self.config.hangman)
+                        schedule.every(30).seconds.do(self.hangman_timeout).tag("hangman")
+                        self.webkicks.send_message(Outgoing(self.hangman.start()))
+                    else:
+                        self.webkicks.send_message(Outgoing(self.hangman.handle(command.param_string)))
+                        schedule.clear("hangman")
+                        if not self.hangman.running:
+                            self.hangman = None
+                        else:
+                            schedule.every(30).seconds.do(self.hangman_timeout).tag("hangman")
+
                 elif hasattr(self.config.commands, command.cmd):
                     # here we handle custom commands
                     self.webkicks.send_message(
@@ -177,12 +193,6 @@ class WKQB:
     def send_random_quote(self):
         self.webkicks.send_message(Outgoing(random.choice(self.config.quote.quotes)))
 
-    def calculate_greeting(self, username):
-        if hasattr(self.config.greeting.custom, username):
-            return getattr(self.config.greeting.custom, username)
-        else:
-            return self.config.greeting
-
     def schedule_quotes(self):
         schedule.every(self.config.quote.interval).minutes.do(self.send_random_quote).tag("quotes")
 
@@ -198,15 +208,20 @@ class WKQB:
     def is_master(self, username):
         return username == self.config.users.master
 
-    def load_settings(self):
-        logger.info("Loading settings")
-        return json.load(open("config.json", "r", encoding="utf-8"), object_hook=Generic.from_dict)
-
     def handle_signal(self, received_signal, frame):
         if received_signal == signal.SIGHUP:
             self.load_settings()
         elif received_signal in [signal.SIGTERM, signal.SIGINT]:
             self.webkicks.logout()
+
+    def hangman_timeout(self):
+        self.webkicks.send_message(Outgoing(self.hangman.timeout()))
+        self.hangman = None
+        schedule.clear("hangman")
+
+    @staticmethod
+    def load_settings():
+        return json.load(open("config.json", "r", encoding="utf-8"), object_hook=Generic.from_dict)
 
     @staticmethod
     def event_loop():
