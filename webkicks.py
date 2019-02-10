@@ -157,12 +157,18 @@ class Webkicks:
         elif m.search(Webkicks.Pattern.COMMENT):
             chat_message = chatmessage.Incoming(m.group(2), m.group(3))
             logger.debug("Comment: " + str(chat_message))
+        elif m.search(Webkicks.Pattern.CHANNELSWITCH):
+            # skipping channel switches
+            pass
         elif m.search(Webkicks.Pattern.UPDATE):
             # skipping update messages
             pass
         elif m.search(Webkicks.Pattern.SOUNDCONTAINER):
             # also skipping soundcontainer
             pass
+        elif m.search(Webkicks.Pattern.REBOOT):
+            logger.debug("Reboot incoming!")
+            logger.debug(message)
         else:
             logger.debug(message)
         return chat_message
