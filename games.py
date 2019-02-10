@@ -1,6 +1,7 @@
 import random
 import re
 
+
 class Hangman:
     def __init__(self, config):
         self.config = config
@@ -15,13 +16,14 @@ class Hangman:
 
     def timeout(self):
         self.running = False
-        return "Timeout!"
+        return "Das Hangman-Spiel wurde beendet, weil es zu lange ignoriert wurde."
 
     def handle(self, param_string: str):
         answer = []
         if param_string.lower() == self.word.lower():
             self.running = False
-            answer.append("Volltreffer, %s ist richtig!" % self.word)
+            return "Volltreffer, %s ist richtig!" % self.word
+
         elif len(param_string) == 1:
             if param_string.lower() in self.word.lower():
                 indices = [m.start() for m in re.finditer(param_string.lower(), self.word.lower())]
@@ -29,18 +31,22 @@ class Hangman:
                     self.guessed[i] = self.word[i].upper()
                 if "".join(self.guessed).lower() == self.word.lower():
                     self.running = False
-                    answer.append("Die Lösung wurde gefunden: %s" % self.word)
+                    return "Die Lösung wurde gefunden: %s" % self.word
                 else:
-                    answer.append("Der Buchstabe %s kommt vor: %s" % (param_string.upper(), " ".join(self.guessed)))
+                    return "Der Buchstabe %s kommt vor: %s" % (param_string.upper(), " ".join(self.guessed))
             else:
                 self.remaining = self.remaining - 1
-                answer.append("Der Buchstabe %s kommt nicht vor! Verbleibende Versuche: %i" % (param_string.upper(), self.remaining))
+                answer.append("Der Buchstabe %s kommt nicht vor!" % param_string.upper())
         else:
             self.remaining = self.remaining - 3
-            answer.append("%s war leider nicht die richtige Lösung. Verbleibende Versuche: %i" % (param_string, self.remaining))
+            answer.append("%s war leider nicht die richtige Lösung." % param_string)
 
         if self.remaining <= 0:
             answer.append("Leider sind alle Versuche aufgebraucht :-(")
+            if self.config.show_solution:
+                answer.append("Die richtige Lösung war: %s" % self.word)
             self.running = False
+        else:
+            answer.append("Verbleibende Versuche: %i" % self.remaining)
 
         return answer
