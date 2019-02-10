@@ -12,11 +12,19 @@ class Hangman:
         self.guessed = ["_"] * len(self.word)
 
     def start(self):
-        return "Hangman gestartet: %s (%i Zeichen)" % (" ".join(self.guessed), len(self.word))
+        answer = [
+            "Hangman gestartet! Gesucht: %s (%i Zeichen)" % (" ".join(self.guessed), len(self.word)),
+            "Rate einen Buchstaben mit <b>!hangman BUCHSTABE</b>. Lösen kannst du mit <b>!hangman LÖSUNG</b>. Viel Erfolg!"
+        ]
+        return answer
 
     def timeout(self):
+        answer = []
         self.running = False
-        return "Das Hangman-Spiel wurde beendet, weil es zu lange ignoriert wurde."
+        answer.append("Das Hangman-Spiel wurde beendet, weil es zu lange ignoriert wurde.")
+        if self.config.show_solution:
+            answer.append("Die richtige Lösung war: %s" % self.word)
+        return answer
 
     def handle(self, param_string: str):
         answer = []
