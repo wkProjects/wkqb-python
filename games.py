@@ -14,7 +14,8 @@ class Hangman:
     def start(self):
         answer = [
             "Hangman gestartet! Gesucht: %s (%i Zeichen)" % (" ".join(self.guessed), len(self.word)),
-            "Rate einen Buchstaben mit <b>!hangman BUCHSTABE</b>. Lösen kannst du mit <b>!hangman LÖSUNG</b>. Viel Erfolg!"
+            "Ratet einen Buchstaben mit <b>!hangman BUCHSTABE</b>. Lösen könnt ihr mit <b>!hangman LÖSUNG</b>. "
+            "Ihr habt <b>10</b> Versuche. Viel Erfolg!"
         ]
         return answer
 
@@ -72,7 +73,7 @@ class Wordmix:
     def start(self):
         answer = [
             "Wordmix gestartet! Gesucht: <b>%s</b>" % self.shuffled,
-            "Rate die Lösung mit <b>!wordmix LÖSUNG</b>. Viel Erfolg!"
+            "Ratet die Lösung mit <b>!wordmix LÖSUNG</b>. Ihr habt <b>2 Minuten</b> Zeit. Viel Erfolg!"
         ]
         return answer
 
