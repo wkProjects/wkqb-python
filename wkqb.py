@@ -12,7 +12,7 @@ import schedule
 from chatmessage import Outgoing
 from commands import Command
 from config import Generic
-from games import Hangman
+from games import Hangman, Wordmix
 from webkicks import Webkicks
 
 logger = logging.getLogger(__name__)
@@ -26,6 +26,7 @@ class WKQB:
         self.config = self.load_settings()
         self.user_list = {}
         self.hangman = None
+        self.wordmix = None
         signal.signal(signal.SIGHUP, self.handle_signal)
         signal.signal(signal.SIGINT, self.handle_signal)
         signal.signal(signal.SIGTERM, self.handle_signal)
@@ -142,7 +143,6 @@ class WKQB:
                         self.send_random_quote()
 
                 elif command.cmd == Command.Commands.HANGMAN:
-                    logger.debug(command.param_string)
                     if not self.hangman:
                         self.hangman = Hangman(self.config.hangman)
                         schedule.every(30).seconds.do(self.hangman_timeout).tag("hangman")
@@ -154,6 +154,17 @@ class WKQB:
                             self.hangman = None
                         else:
                             schedule.every(30).seconds.do(self.hangman_timeout).tag("hangman")
+
+                elif command.cmd == Command.Commands.WORDMIX:
+                    if not self.wordmix:
+                        self.wordmix = Wordmix(self.config.wordmix)
+                        schedule.every(1).minutes.do(self.wordmix_timeout).tag("wordmix")
+                        self.webkicks.send_message(Outgoing(self.wordmix.start()))
+                    else:
+                        self.webkicks.send_message(Outgoing(self.wordmix.handle(command.param_string)))
+                        if not self.wordmix.running:
+                            schedule.clear("wordmix")
+                            self.wordmix = None
 
                 elif hasattr(self.config.commands, command.cmd):
                     # here we handle custom commands
@@ -218,6 +229,11 @@ class WKQB:
         self.webkicks.send_message(Outgoing(self.hangman.timeout()))
         self.hangman = None
         schedule.clear("hangman")
+
+    def wordmix_timeout(self):
+        self.webkicks.send_message(Outgoing(self.wordmix.timeout()))
+        self.wordmix = None
+        schedule.clear("wordmix")
 
     @staticmethod
     def load_settings():

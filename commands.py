@@ -12,6 +12,7 @@ class Command:
         IGNORED = "ignored"
 
         HANGMAN = "hangman"
+        WORDMIX = "wordmix"
 
     def __init__(self, cmd, param_string=""):
         self.cmd = cmd

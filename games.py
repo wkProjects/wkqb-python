@@ -58,3 +58,36 @@ class Hangman:
             answer.append("Verbleibende Versuche: %i" % self.remaining)
 
         return answer
+
+
+class Wordmix:
+    def __init__(self, config):
+        self.config = config
+        self.running = True
+        self.remaining = 10
+
+        self.word: str = random.choice(config.words)
+        self.shuffled: str = ''.join(random.sample(self.word, len(self.word)))
+
+    def start(self):
+        answer = [
+            "Wordmix gestartet! Gesucht: <b>%s</b>" % self.shuffled,
+            "Rate die Lösung mit <b>!wordmix LÖSUNG</b>. Viel Erfolg!"
+        ]
+        return answer
+
+    def timeout(self):
+        answer = []
+        self.running = False
+        answer.append("Die Zeit für Wordmix ist abgelaufen!")
+        if self.config.show_solution:
+            answer.append("Die richtige Lösung war: %s" % self.word)
+        return answer
+
+    def handle(self, param_string: str):
+        if param_string.lower() == self.word.lower():
+            self.running = False
+            return "Volltreffer, %s ist richtig!" % self.word
+
+        else:
+            return "%s war leider nicht die richtige Lösung." % param_string

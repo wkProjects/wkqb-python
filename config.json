@@ -79,5 +79,13 @@
       "Fleisch",
       "Gemüse"
     ]
+  },
+  "wordmix": {
+    "show_solution": true,
+    "words": [
+      "Fisch",
+      "Fleisch",
+      "Gemüse"
+    ]
   }
 }
