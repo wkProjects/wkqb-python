@@ -16,33 +16,59 @@ logger = logging.getLogger(__name__)
 class Webkicks:
     class Pattern:
         CHATMESSAGE = re.compile(
-            '<FONT SIZE=-2>\((.*?)\)</FONT> <b><font title="(.*?)">.*?: (.*?)</font></td></tr></table>')
+            r'<FONT SIZE=-2>\((.*?)\)</FONT> '
+            r'<b><font title="(.*?)">.*?: (.*?)</font></td></tr></table>')
         METEXT = re.compile(
-            '<FONT SIZE=-2>\((.*?)\)</FONT> <font title="(.*?)"><b><i><span onclick="fluester\(\'?:.+\'\)"><b>.+</b>\s*(.+)</i>')
+            r'<FONT SIZE=-2>\((.*?)\)</FONT> '
+            r'<font title="(.*?)"><b><i><span onclick="fluester\(\'?:.+\'\)"><b>.+</b>\s*(.+)</i>')
         WHISPERMESSAGE = re.compile(
-            '<FONT SIZE=-2>\((.*?)\)</FONT> <b><span onclick="fluester\(\'(.*?)\'\)">.*? fl&uuml;stert</span>: <font color=red>(.*?)</font></td></tr></table>')
+            r'<FONT SIZE=-2>\((.*?)\)</FONT> '
+            r'<b><span onclick="fluester\(\'(.*?)\'\)">.*? fl&uuml;stert</span>: '
+            r'<font color=red>(.*?)</font></td></tr></table>')
         CHATBOTMESSAGE = re.compile(
-            '<FONT SIZE=-2>\((.*?)\)</FONT> <font title=".*?"><b><font color="#FF0000">(Chat-Bot):</font><span class="not_reg"> (.*?)</span></b></font></td></tr></table>')
+            r'<FONT SIZE=-2>\((.*?)\)</FONT> '
+            r'<font title=".*?"><b><font color="#FF0000">(Chat-Bot):</font>'
+            r'<span class="not_reg"> (.*?)</span></b></font></td></tr></table>')
         CHATBOTPM = re.compile(
-            '<FONT SIZE=-2>\((.*?)\)</FONT> <font title=".*?"><b><font color="#FF0000">(Chat-Bot-PM):</font><span class="not_reg"> (.*?)</span></b></td></tr>')
+            r'<FONT SIZE=-2>\((.*?)\)</FONT> '
+            r'<font title=".*?"><b><font color="#FF0000">(Chat-Bot-PM):</font>'
+            r'<span class="not_reg"> (.*?)</span></b></td></tr>')
         LOGINMESSAGE = re.compile(
-            '<FONT SIZE=-2>\((.*?)\)</FONT> <font title=".*?"><img src="/gruen.gif"><login ([^ ]+) />', re.IGNORECASE)
+            r'<FONT SIZE=-2>\((.*?)\)</FONT> '
+            r'<font title=".*?"><img src="/gruen.gif"><login ([^ ]+) />', re.IGNORECASE)
         CHANNELSWITCH = re.compile(
-            '<FONT SIZE=-2>\((.*?)\)</FONT> <font title="(.*?)"><img src="/gruen.gif"><b><i><span onclick="fluester\(\'(?:\2)\'\)"><b>(.*?)</b></span><span class="commandcolor">.+</b></span><span class="not_reg"> \(von <b>(?:.+)</b>\)</span></i>')
+            r'<FONT SIZE=-2>\((.*?)\)</FONT> '
+            r'<font title="(.*?)"><img src="/gruen.gif"><b><i>'
+            r'<span onclick="fluester\(\'(?:\2)\'\)"><b>(.*?)</b></span>'
+            r'<span class="commandcolor">.+</b></span><span class="not_reg"> \(von <b>(?:.+)</b>\)</span></i>')
         AWAY = re.compile(
-            '<FONT SIZE=-2>\((.*?)\)</FONT> <b><font title="(.*?)"><span onclick="fluester\(\'(?:.+)\'\)"><i><b>(.+)</b>\s*meldet sich wieder zurück.</i>')
+            r'<FONT SIZE=-2>\((.*?)\)</FONT> '
+            r'<b><font title="(.*?)"><span onclick="fluester\(\'(?:.+)\'\)">'
+            r'<i><b>(.+)</b>\s*meldet sich wieder zurück.</i>')
         LOGOUTMESSAGE = re.compile(
-            '<FONT SIZE=-2>\((.*?)\)</FONT> <font title="(.*?)"><img src=".*?/rot.gif">.*?<span class="commandcolor"> (.*?)</b></span></i>.*?</td></tr></table>')
+            r'<FONT SIZE=-2>\((.*?)\)</FONT> '
+            r'<font title="(.*?)"><img src=".*?/rot.gif">.*?'
+            r'<span class="commandcolor"> (.*?)</b></span></i>.*?</td></tr></table>')
         REPLACER = re.compile(
-            '<span onclick="javascript: repClick\(\'(.+?)\'\)" style="cursor: pointer;"><img src="/[_a-zA-Z0-9-]+/replacer/(.+?).(gif|jpg|png)" alt="&#58;(.+?)"></span>')
+            r'<span onclick="javascript: repClick\(\'(.+?)\'\)" style="cursor: pointer;">'
+            r'<img src="/[_a-zA-Z0-9-]+/replacer/(.+?).(gif|jpg|png)" alt="&#58;(.+?)">'
+            r'</span>')
         REBOOT = re.compile(
-            '<table border=0><tr><td valign=bottom><br /><font title="WebKicks.De - Sysadmin"><b><font color="#FF0000">System-Meldung:</font><span class="not_reg"> Der Chat wird aufgrund des nächtlichen Wartungszyklus für ca 40 Sekunden ausfallen.</span></b><br /><br /></td></tr></table>')
-        UPDATE = re.compile('<!-- update!* //-->')
-        SOUNDCONTAINER = re.compile('<div id="soundcontainer"></div>')
+            r'<table border=0><tr><td valign=bottom><br />'
+            r'<font title="WebKicks.De - Sysadmin"><b><font color="#FF0000">System-Meldung:</font>'
+            r'<span class="not_reg"> '
+            r'Der Chat wird aufgrund des nächtlichen Wartungszyklus für ca 40 Sekunden ausfallen.'
+            r'</span></b><br /><br /></td></tr>'
+            r'</table>')
+        UPDATE = re.compile(r'<!-- update!* //-->')
+        SOUNDCONTAINER = re.compile(r'<div id="soundcontainer"></div>')
         LOGOUT = re.compile(
-            '<script language="JavaScript">window.location.replace("https://server\d.webkicks.de/[a-zA-Z_-]+/logout");</script>')
+            r'<script language="JavaScript">'
+            r'window.location.replace("https://server\d.webkicks.de/[a-zA-Z_-]+/logout");'
+            r'</script>')
         COMMENT = re.compile(
-            '<FONT SIZE=-2>\((.*?)\)</FONT> <img src="/pfeilg.gif"> <font title="(.*?)"><b><span class="not_reg"> (.*?)</span></b></td></tr></table>')
+            r'<FONT SIZE=-2>\((.*?)\)</FONT> <img src="/pfeilg.gif"> '
+            r'<font title="(.*?)"><b><span class="not_reg"> (.*?)</span></b></td></tr></table>')
 
     class Type:
         CHATMESSAGE = 0
