@@ -12,7 +12,7 @@ import schedule
 from chatmessage import Outgoing
 from commands import Command
 from config import Generic
-from games import Hangman, Wordmix
+from games import Hangman, Timebomb, Wordmix
 from webkicks import Webkicks
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,8 @@ class WKQB:
         self.user_list = {}
         self.hangman = None
         self.wordmix = None
+        self.timebomb = None
+
         signal.signal(signal.SIGHUP, self.handle_signal)
         signal.signal(signal.SIGINT, self.handle_signal)
         signal.signal(signal.SIGTERM, self.handle_signal)
@@ -166,6 +168,24 @@ class WKQB:
                             schedule.clear("wordmix")
                             self.wordmix = None
 
+                elif command.cmd in [Command.Commands.TIMEBOMB, Command.Commands.CUT]:
+                    if command.cmd == Command.Commands.TIMEBOMB:
+                        if not self.timebomb:
+                            self.timebomb = Timebomb(chat_message.user, command.param_string)
+                            schedule.every(self.timebomb.time).seconds.do(self.timebomb_timeout).tag("timebomb")
+                            self.webkicks.send_message(Outgoing(self.timebomb.start(chat_message)))
+                        else:
+                            self.webkicks.send_message(Outgoing("Es läuft bereits ein Spiel!"))
+                    elif command.cmd == Command.Commands.CUT:
+                        if self.timebomb:
+                            self.webkicks.send_message(
+                                Outgoing(self.timebomb.handle(chat_message, command.param_string)))
+                        else:
+                            self.webkicks.send_message(Outgoing("Es läuft doch gar kein Spiel!"))
+                    if self.timebomb and not self.timebomb.running:
+                        schedule.clear("timebomb")
+                        self.timebomb = None
+
                 elif hasattr(self.config.commands, command.cmd):
                     # here we handle custom commands
                     self.webkicks.send_message(
@@ -234,6 +254,11 @@ class WKQB:
         self.webkicks.send_message(Outgoing(self.wordmix.timeout()))
         self.wordmix = None
         schedule.clear("wordmix")
+
+    def timebomb_timeout(self):
+        self.webkicks.send_message(Outgoing(self.timebomb.timeout()))
+        self.timebomb = None
+        schedule.clear("timebomb")
 
     @staticmethod
     def load_settings():

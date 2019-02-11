@@ -14,6 +14,9 @@ class Command:
         HANGMAN = "hangman"
         WORDMIX = "wordmix"
 
+        TIMEBOMB = "zeitbombe"
+        CUT = "schneide"
+
     def __init__(self, cmd, param_string=""):
         self.cmd = cmd
         self.param_string = param_string

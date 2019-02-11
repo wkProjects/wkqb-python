@@ -1,6 +1,8 @@
 import random
 import re
 
+from chatmessage import Incoming
+
 
 class Hangman:
     def __init__(self, config):
@@ -92,3 +94,51 @@ class Wordmix:
 
         else:
             return "%s war leider nicht die richtige Lösung." % param_string
+
+
+class Timebomb:
+    def __init__(self, offender, victim):
+        wires = ["Rot",
+                 "Grün",
+                 "Blau",
+                 "Schwarz",
+                 "Cyan",
+                 "Braun",
+                 "Weiß",
+                 "Grau",
+                 "Antikweiß",
+                 "Hellgrün",
+                 "Eisfarben",
+                 "grün-gelb-gepunktet",
+                 "rot-weiß-gestrichelt",
+                 "grau-braun-gepunktet",
+                 "grau-weiß-gepunktet mit Lila Streifen",
+                 "Unsichtbar"]
+        self.offender = offender
+        self.victim = victim
+        self.wires = random.sample(wires, k=3)
+        self.wire = random.choice(self.wires)
+        self.time = random.randint(15, 30)
+        self.running = True
+
+    def start(self, chat_message: Incoming):
+        if not chat_message.get_command().param_string:
+            self.victim = chat_message.user
+        return [
+            "%s schiebt %s eine Bombe zu! Der Timer sagt: <b>%i</b> Sekunden!" % (self.offender, self.victim, self.time),
+            "Schneide ein Kabel mit <b>!schneide FARBE</b> durch. "
+            "Die Bombe hat folgende Kabel: <b>%s</b>" % ', '.join(self.wires)
+        ]
+
+    def timeout(self):
+        return "%s hat es nicht rechtzeitig geschafft, die Bombe zu entschärfen :-(" % self.victim
+
+    def handle(self, chat_message: Incoming, param_string: str):
+        if chat_message.user.lower() == self.victim.lower():
+            self.running = False
+            if param_string.lower() == self.wire.lower():
+                return "%s hat die Bombe entschärft. Glückwunsch!" % self.victim
+            else:
+                return "Das war leider das falsche Kabel!"
+        else:
+            return "Du bist doch gar nicht dran!"
