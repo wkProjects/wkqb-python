@@ -57,7 +57,7 @@ class Webkicks:
             r'<table border=0><tr><td valign=bottom><br />'
             r'<font title="WebKicks.De - Sysadmin"><b><font color="#FF0000">System-Meldung:</font>'
             r'<span class="not_reg"> '
-            r'Der Chat wird aufgrund des nächtlichen Wartungszyklus für ca 40 Sekunden ausfallen.'
+            r'Der Chat wird aufgrund des nächtlichen Wartungszyklus für ca. 10 Sekunden ausfallen.'
             r'</span></b><br /><br /></td></tr>'
             r'</table>')
         UPDATE = re.compile(r'<!-- update!* //-->')
