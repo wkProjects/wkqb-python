@@ -228,16 +228,16 @@ class WKQB:
         schedule.every(self.config.quote.interval).minutes.do(self.send_random_quote).tag("quotes")
 
     def is_ignored(self, username):
-        return username in self.config.users.ignored
+        return username.lower() in map(str.lower, self.config.users.ignored) and not self.is_mod(username.lower())
 
     def is_mod(self, username):
-        return self.is_admin(username) or username in self.config.users.mods
+        return self.is_admin(username) or username.lower() in map(str.lower, self.config.users.mods)
 
     def is_admin(self, username):
-        return self.is_master(username) or username in self.config.users.admins
+        return self.is_master(username) or username.lower() in map(str.lower, self.config.users.admins)
 
     def is_master(self, username):
-        return username == self.config.users.master
+        return username.lower() == self.config.users.master.lower()
 
     def handle_signal(self, received_signal, frame):
         if received_signal == signal.SIGHUP:

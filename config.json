@@ -21,12 +21,12 @@
     }
   },
   "users": {
-    "master": "Linus",
+    "master": "Hans",
     "admins": [
       "wkQB"
     ],
     "mods": [],
-    "ignored": []
+    "ignored": ["wkQB"]
   },
   "commands": {
     "test": "Hallo!",
