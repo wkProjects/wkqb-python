@@ -61,6 +61,12 @@ class WKQB:
                     chat_started = True
                 if chat_started:
                     chat_message = self.webkicks.parse_message(line)
+                    if chat_message and chat_message.user:
+                        chat_message.from_ignored = self.is_ignored(chat_message.user)
+                        chat_message.from_mod = self.is_mod(chat_message.user)
+                        chat_message.from_admin = self.is_admin(chat_message.user)
+                        chat_message.from_master = self.is_master(chat_message.user)
+
                     self.handle_message(chat_message)
 
         # stream is closed, time to cleanup
@@ -71,7 +77,7 @@ class WKQB:
             if chat_message.user == self.webkicks.username:
                 # we dont want to react to our own messages
                 return
-            if self.is_ignored(chat_message.user):
+            if chat_message.from_ignored:
                 # we also ignore ignored users, obviously
                 return
             if chat_message.type == Webkicks.Type.LOGIN:
@@ -88,18 +94,18 @@ class WKQB:
                     self.webkicks.send_message(Outgoing("Pong!"))
 
                 elif command.cmd == Command.Commands.SAY:
-                    if self.is_admin(chat_message.user):
+                    if chat_message.from_admin:
                         self.webkicks.send_message(Outgoing(command.param_string))
 
                 elif command.cmd == Command.Commands.RELOAD:
-                    if self.is_mod(chat_message.user):
+                    if chat_message.from_mod:
                         self.config = self.load_settings()
                         schedule.clear("quotes")
                         self.schedule_quotes()
                         self.webkicks.send_message(Outgoing("Einstellungen neu geladen!"))
 
                 elif command.cmd == Command.Commands.QUIT:
-                    if self.is_admin(chat_message.user):
+                    if chat_message.from_admin:
                         self.webkicks.send_message(Outgoing("Oh je, ich muss wohl gehen :-("))
                         self.webkicks.send_message(Outgoing("/exit"))
 
