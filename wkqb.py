@@ -165,7 +165,7 @@ class WKQB:
                         schedule.every(1).minutes.do(self.hangman_timeout).tag("hangman")
                         self.webkicks.send_message(Outgoing(self.hangman.start()))
                     else:
-                        self.webkicks.send_message(Outgoing(self.hangman.handle(command.param_string)))
+                        self.webkicks.send_message(Outgoing(self.hangman.handle(chat_message)))
                         schedule.clear("hangman")
                         if not self.hangman.running:
                             self.hangman = None
@@ -178,7 +178,7 @@ class WKQB:
                         schedule.every(2).minutes.do(self.wordmix_timeout).tag("wordmix")
                         self.webkicks.send_message(Outgoing(self.wordmix.start()))
                     else:
-                        self.webkicks.send_message(Outgoing(self.wordmix.handle(command.param_string)))
+                        self.webkicks.send_message(Outgoing(self.wordmix.handle(chat_message)))
                         if not self.wordmix.running:
                             schedule.clear("wordmix")
                             self.wordmix = None
@@ -197,7 +197,7 @@ class WKQB:
                     elif command.cmd == Command.Commands.CUT:
                         if self.timebomb:
                             self.webkicks.send_message(
-                                Outgoing(self.timebomb.handle(chat_message, command.param_string)))
+                                Outgoing(self.timebomb.handle(chat_message)))
                         else:
                             self.webkicks.send_message(Outgoing("Es läuft doch gar kein Spiel!"))
                     if self.timebomb and not self.timebomb.running:
