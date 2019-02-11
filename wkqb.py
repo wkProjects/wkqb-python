@@ -171,9 +171,12 @@ class WKQB:
                 elif command.cmd in [Command.Commands.TIMEBOMB, Command.Commands.CUT]:
                     if command.cmd == Command.Commands.TIMEBOMB:
                         if not self.timebomb:
-                            self.timebomb = Timebomb(chat_message.user, command.param_string)
-                            schedule.every(self.timebomb.time).seconds.do(self.timebomb_timeout).tag("timebomb")
-                            self.webkicks.send_message(Outgoing(self.timebomb.start(chat_message)))
+                            if self.is_ignored(command.param_string):
+                                self.webkicks.send_message(Outgoing("Mit ignorierten Usern spiele ich nicht!"))
+                            else:
+                                self.timebomb = Timebomb(chat_message.user, command.param_string)
+                                schedule.every(self.timebomb.time).seconds.do(self.timebomb_timeout).tag("timebomb")
+                                self.webkicks.send_message(Outgoing(self.timebomb.start(chat_message)))
                         else:
                             self.webkicks.send_message(Outgoing("Es läuft bereits ein Spiel!"))
                     elif command.cmd == Command.Commands.CUT:
