@@ -6,17 +6,26 @@ from typing import Dict
 from commands import Command
 
 
+class Level:
+    IGNORED = -999
+    GUEST = 0
+    USER = 1
+    MOD = 2
+    ADMIN = 3
+    MASTER = 4
+
+    @staticmethod
+    def get_name(level: int):
+        return ["Gast", "User", "Mod", "Admin", "Master"][level]
+
+
 class Incoming:
     def __init__(self, user, message):
         self.time = time()
         self.user = user
         self.message = message
         self.type = None
-        self.from_guest = True if "(Gast)" in self.user else False
-        self.from_ignored = False
-        self.from_mod = False
-        self.from_admin = False
-        self.from_master = False
+        self.level = Level.GUEST if "(Gast)" in self.user else Level.USER
 
     def __str__(self):
         return "(" + strftime("%a, %d %b %Y %H:%M:%S", localtime(self.time)) + ") " + self.user + ": " + self.message

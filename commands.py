@@ -10,10 +10,10 @@ class Command:
         ADMINS = "admins"
         MODS = "mods"
         IGNORED = "ignored"
+        LEVEL = "level"
 
         HANGMAN = "hangman"
         WORDMIX = "wordmix"
-
         TIMEBOMB = "zeitbombe"
         CUT = "schneide"
 

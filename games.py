@@ -29,11 +29,12 @@ class Hangman:
             answer.append("Die richtige Lösung war: %s" % self.word)
         return answer
 
-    def handle(self, param_string: str):
+    def handle(self, chat_message: Incoming):
         answer = []
+        param_string = chat_message.get_command().param_string
         if param_string.lower() == self.word.lower():
             self.running = False
-            return "Volltreffer, %s ist richtig!" % self.word
+            return "Volltreffer %s, %s ist richtig!" % (chat_message.user, self.word)
 
         elif len(param_string) == 1:
             if param_string.lower() in self.word.lower():
@@ -42,15 +43,16 @@ class Hangman:
                     self.guessed[i] = self.word[i].upper()
                 if "".join(self.guessed).lower() == self.word.lower():
                     self.running = False
-                    return "Die Lösung wurde gefunden: %s" % self.word
+                    return "Die Lösung wurde von %s gefunden: %s" % (chat_message.user, self.word)
                 else:
-                    return "Der Buchstabe %s kommt vor: %s" % (param_string.upper(), " ".join(self.guessed))
+                    return "%s, der Buchstabe %s kommt vor: %s" % (
+                        chat_message.user, param_string.upper(), " ".join(self.guessed))
             else:
                 self.remaining = self.remaining - 1
-                answer.append("Der Buchstabe %s kommt nicht vor!" % param_string.upper())
+                answer.append("%s, der Buchstabe %s kommt nicht vor!" % (chat_message.user, param_string.upper()))
         else:
             self.remaining = self.remaining - 3
-            answer.append("%s war leider nicht die richtige Lösung." % param_string)
+            answer.append("%s, %s war leider nicht die richtige Lösung." % (chat_message.user, param_string))
 
         if self.remaining <= 0:
             answer.append("Leider sind alle Versuche aufgebraucht :-(")
@@ -87,13 +89,14 @@ class Wordmix:
             answer.append("Die richtige Lösung war: %s" % self.word)
         return answer
 
-    def handle(self, param_string: str):
+    def handle(self, chat_message: Incoming):
+        param_string = chat_message.get_command().param_string
         if param_string.lower() == self.word.lower():
             self.running = False
-            return "Volltreffer, %s ist richtig!" % self.word
+            return "Volltreffer %s, %s ist richtig!" % (chat_message.user, self.word)
 
         else:
-            return "%s war leider nicht die richtige Lösung." % param_string
+            return "%s, %s war leider nicht die richtige Lösung." % (chat_message.user, param_string)
 
 
 class Timebomb:
@@ -125,7 +128,8 @@ class Timebomb:
         if not chat_message.get_command().param_string:
             self.victim = chat_message.user
         return [
-            "%s schiebt %s eine Bombe zu! Der Timer sagt: <b>%i</b> Sekunden!" % (self.offender, self.victim, self.time),
+            "%s schiebt %s eine Bombe zu! Der Timer sagt: <b>%i</b> Sekunden!" % (
+                self.offender, self.victim, self.time),
             "Schneide ein Kabel mit <b>!schneide FARBE</b> durch. "
             "Die Bombe hat folgende Kabel: <b>%s</b>" % ', '.join(self.wires)
         ]
@@ -133,10 +137,10 @@ class Timebomb:
     def timeout(self):
         return "%s hat es nicht rechtzeitig geschafft, die Bombe zu entschärfen :-(" % self.victim
 
-    def handle(self, chat_message: Incoming, param_string: str):
+    def handle(self, chat_message: Incoming):
         if chat_message.user.lower() == self.victim.lower():
             self.running = False
-            if param_string.lower() == self.wire.lower():
+            if chat_message.get_command().param_string.lower() == self.wire.lower():
                 return "%s hat die Bombe entschärft. Glückwunsch!" % self.victim
             else:
                 return "Das war leider das falsche Kabel!"

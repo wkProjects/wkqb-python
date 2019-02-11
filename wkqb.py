@@ -9,7 +9,7 @@ import time
 
 import schedule
 
-from chatmessage import Outgoing
+from chatmessage import Level, Outgoing
 from commands import Command
 from config import Generic
 from games import Hangman, Timebomb, Wordmix
@@ -62,10 +62,14 @@ class WKQB:
                 if chat_started:
                     chat_message = self.webkicks.parse_message(line)
                     if chat_message and chat_message.user:
-                        chat_message.from_ignored = self.is_ignored(chat_message.user)
-                        chat_message.from_mod = self.is_mod(chat_message.user)
-                        chat_message.from_admin = self.is_admin(chat_message.user)
-                        chat_message.from_master = self.is_master(chat_message.user)
+                        if self.is_ignored(chat_message.user):
+                            chat_message.level = Level.IGNORED
+                        elif self.is_master(chat_message.user):
+                            chat_message.level = Level.MASTER
+                        elif self.is_admin(chat_message.user):
+                            chat_message.level = Level.ADMIN
+                        elif self.is_mod(chat_message.user):
+                            chat_message.level = Level.MOD
 
                     self.handle_message(chat_message)
 
@@ -77,7 +81,7 @@ class WKQB:
             if chat_message.user == self.webkicks.username:
                 # we dont want to react to our own messages
                 return
-            if chat_message.from_ignored:
+            if chat_message.level == Level.IGNORED:
                 # we also ignore ignored users, obviously
                 return
             if chat_message.type == Webkicks.Type.LOGIN:
@@ -94,18 +98,18 @@ class WKQB:
                     self.webkicks.send_message(Outgoing("Pong!"))
 
                 elif command.cmd == Command.Commands.SAY:
-                    if chat_message.from_admin:
+                    if chat_message.level >= Level.ADMIN:
                         self.webkicks.send_message(Outgoing(command.param_string))
 
                 elif command.cmd == Command.Commands.RELOAD:
-                    if chat_message.from_mod:
+                    if chat_message.level >= Level.MOD:
                         self.config = self.load_settings()
                         schedule.clear("quotes")
                         self.schedule_quotes()
                         self.webkicks.send_message(Outgoing("Einstellungen neu geladen!"))
 
                 elif command.cmd == Command.Commands.QUIT:
-                    if chat_message.from_admin:
+                    if chat_message.level >= Level.ADMIN:
                         self.webkicks.send_message(Outgoing("Oh je, ich muss wohl gehen :-("))
                         self.webkicks.send_message(Outgoing("/exit"))
 
@@ -129,6 +133,11 @@ class WKQB:
                         self.webkicks.send_message(Outgoing("Ignoriert: " + str.join(", ", self.config.users.ignored)))
                     else:
                         self.webkicks.send_message(Outgoing("Niemand wird ignoriert :-)"))
+
+                elif command.cmd == Command.Commands.LEVEL:
+                    self.webkicks.send_message(
+                        Outgoing("%s, dein Level ist: %s" % (
+                            chat_message.user, Level.get_name(chat_message.level))))
 
                 elif command.cmd == Command.Commands.QUOTE:
                     if command.param_string:
@@ -203,7 +212,7 @@ class WKQB:
             else:
                 # no we do the pattern matching, based on the conditions provided
                 for entry in self.config.pattern.list:
-                    if entry.guest_reaction or not chat_message.from_guest:
+                    if entry.guest_reaction or chat_message.level >= 1:
                         if (entry.type == 'regex' and re.search(entry.pattern, chat_message.message)) or (
                                 entry.type == 'plain' and entry.pattern in chat_message.message):
                             if not entry.needs_bot_name or re.search(r"\b" + self.webkicks.username.lower() + r"\b",
