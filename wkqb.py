@@ -204,11 +204,14 @@ class WKQB:
                         schedule.clear("timebomb")
                         self.timebomb = None
 
-                elif hasattr(self.config.commands, command.cmd):
+                else:
                     # here we handle custom commands
-                    self.webkicks.send_message(
-                        Outgoing(getattr(self.config.commands, command.cmd), replacements={"user": chat_message.user,
-                                                                                           "param": command.param_string}))
+                    for cmd in self.config.commands.list:
+                        if cmd.command == command.cmd and chat_message.level >= cmd.min_level:
+                            self.webkicks.send_message(Outgoing(cmd.reaction,
+                                                                replacements={"user": chat_message.user,
+                                                                              "param": command.param_string}))
+                            break
             else:
                 # no we do the pattern matching, based on the conditions provided
                 for entry in self.config.pattern.list:

@@ -21,21 +21,28 @@
     }
   },
   "users": {
-    "master": "Hans",
+    "master": "Linus",
     "admins": [
       "wkQB"
     ],
     "mods": [],
-    "ignored": ["wkQB"]
+    "ignored": [
+      "wkQB"
+    ]
   },
   "commands": {
-    "test": "Hallo!",
-    "random": [
-      "%RANDOM%",
-      "%RANDOM%"
-    ],
-    "param": "%PARAM%",
-    "user": "%USER%"
+    "list": [
+      {
+        "command": "test",
+        "reaction": "Erfolgreich!",
+        "min_level": 1
+      },
+      {
+        "command": "random",
+        "reaction": ["%RANDOM%", "%RANDOM%"],
+        "min_level": 2
+      }
+    ]
   },
   "pattern": {
     "list": [
