@@ -28,7 +28,7 @@ class Webkicks:
         CHATBOTMESSAGE = re.compile(
             r'<FONT SIZE=-2>\((.*?)\)</FONT> '
             r'<font title=".*?"><b><font color="#FF0000">(Chat-Bot):</font>'
-            r'<span class="not_reg"> (.*?)</span></b></font></td></tr></table>')
+            r'<span class="not_reg"> (.*?)</span></b></td></tr></table>')
         CHATBOTPM = re.compile(
             r'<FONT SIZE=-2>\((.*?)\)</FONT> '
             r'<font title=".*?"><b><font color="#FF0000">(Chat-Bot-PM):</font>'
@@ -166,6 +166,9 @@ class Webkicks:
         elif m.search(Webkicks.Pattern.COMMENT):
             chat_message = chatmessage.Incoming(m.group(2), m.group(3))
             logger.debug("Comment: " + str(chat_message))
+        elif m.search(Webkicks.Pattern.CHATBOTPM) or m.search(Webkicks.Pattern.CHATBOTMESSAGE):
+            chat_message = chatmessage.Incoming(m.group(2), m.group(3))
+            logger.debug("Chat-Bot: " + str(chat_message))
         elif m.search(Webkicks.Pattern.CHANNELSWITCH):
             # skipping channel switches
             pass
