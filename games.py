@@ -13,6 +13,8 @@ class Hangman:
         self.word: str = random.choice(config.words)
         self.guessed = ["_"] * len(self.word)
 
+        self.guesses = []
+
     def start(self):
         answer = [
             "Hangman gestartet! Gesucht: %s (%i Zeichen)" % (" ".join(self.guessed), len(self.word)),
@@ -32,12 +34,16 @@ class Hangman:
     def handle(self, chat_message: Incoming):
         answer = []
         param_string = chat_message.get_command().param_string
-        if param_string.lower() == self.word.lower():
+        if param_string.upper() in self.guesses:
+            return f"{chat_message.user}, {param_string} wurde bereits probiert."
+
+        elif param_string.lower() == self.word.lower():
             self.running = False
             return "Volltreffer %s, %s ist richtig!" % (chat_message.user, self.word)
 
         elif len(param_string) == 1:
             if param_string.lower() in self.word.lower():
+                self.guesses.append(param_string.upper())
                 indices = [m.start() for m in re.finditer(param_string.lower(), self.word.lower())]
                 for i in indices:
                     self.guessed[i] = self.word[i].upper()
@@ -49,9 +55,11 @@ class Hangman:
                         chat_message.user, param_string.upper(), " ".join(self.guessed))
             else:
                 self.remaining = self.remaining - 1
+                self.guesses.append(param_string.upper())
                 answer.append("%s, der Buchstabe %s kommt nicht vor!" % (chat_message.user, param_string.upper()))
         else:
             self.remaining = self.remaining - 3
+            self.guesses.append(param_string.upper())
             answer.append("%s, %s war leider nicht die richtige Lösung." % (chat_message.user, param_string))
 
         if self.remaining <= 0:
