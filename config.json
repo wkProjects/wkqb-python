@@ -1,6 +1,8 @@
 {
   "quote": {
     "interval": 15,
+    "prefix": "",
+    "suffix": "",
     "quotes": [
       "Quote 1",
       "Quote 2",

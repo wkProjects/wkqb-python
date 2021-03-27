@@ -243,7 +243,7 @@ class WKQB:
         self.webkicks.send_delayed(greeting, 5)
 
     def send_random_quote(self):
-        self.webkicks.send_message(Outgoing(random.choice(self.config.quote.quotes)))
+        self.webkicks.send_message(Outgoing(" ".join([self.config.quote.prefix, random.choice(self.config.quote.quotes), self.config.quote.suffix]).strip()))
 
     def schedule_quotes(self):
         schedule.every(self.config.quote.interval).minutes.do(self.send_random_quote).tag("quotes")
