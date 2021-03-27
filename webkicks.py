@@ -82,28 +82,37 @@ class Webkicks:
         UPDATE = 8
 
     def __init__(self, chat_url, **kwargs):
-        self.chat_url = chat_url
-        self.username = kwargs.get("username")
-        self.password = kwargs.get("password")
-        self.sid = self.sid_from_password(self.password)
-
-        chat_url_parts = urlparse(self.chat_url)
-        self.cid = chat_url_parts.path.replace('/', '')
-        self.server_url = chat_url_parts.scheme + "://" + chat_url_parts.netloc + "/"
-        self.send_url = self.server_url + "/cgi-bin/chat.cgi"
-        self.stream_frame_url = chat_url + "chatstream/" + self.username + "/" + self.sid + "/start"
-
-        self.stream_url = ''
         self.http_client = requests.Session()
         self.http_client.headers.update({"User-Agent": "wkQB 5.0 'Python'"})
 
+        self.username = kwargs.get("username")
+        self.password = kwargs.get("password")
+
+        chat_url_parts = urlparse(chat_url)
+        self.cid = chat_url_parts.path.replace('/', '')
+        self.server_url = chat_url_parts.scheme + "://" + chat_url_parts.netloc
+        self.chat_url = self.server_url + '/' + self.cid
+        self.sid = self.sid_from_api()
+        self.send_url = self.server_url + "/cgi-bin/chat.cgi"
+        self.stream_frame_url = self.chat_url + "/chatstream/" + \
+            self.username + "/" + self.sid + "/start"
+        self.stream_url = ''
+
         schedule.every(15).minutes.do(self.prevent_timeout)
+
+    def sid_from_api(self):
+        return self.http_client.post(self.chat_url + '/api', data={
+            'cid': self.cid,
+            'user': self.username.lower(),
+            'pass': self.password,
+            'job': 'get_sid'
+        }).json()["sid"]
 
     def sid_from_password(self, password):
         return des_crypt.hash(password, salt="88")
 
     def login(self):
-        self.http_client.post(self.chat_url,
+        self.http_client.post(self.chat_url + "/",
                               data={"user": self.username, "pass": self.password, "cid": self.cid, "job": "ok",
                                     "login": "Login",
                                     "guest": ""})
@@ -135,7 +144,7 @@ class Webkicks:
         return self.stream_url
 
     def prevent_timeout(self):
-        self.http_client.get(self.chat_url + "tok/" + self.username.lower() + "/" + self.sid + "/")
+        self.http_client.get(self.chat_url + "/tok/" + self.username.lower() + "/" + self.sid + "/")
 
     def parse_message(self, message):
         chat_message = None

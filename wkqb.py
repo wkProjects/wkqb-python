@@ -36,7 +36,6 @@ class WKQB:
     def run(self):
 
         self.webkicks.login()
-        self.webkicks.send_delayed(Outgoing("Hallo! (wkQB 5.0, https://wkqb.de)"), 5)
         stream_url = self.webkicks.get_stream_url()
 
         chat_started = False
@@ -50,6 +49,7 @@ class WKQB:
             if line:
                 if self.webkicks.Pattern.UPDATE.match(line) and not chat_started:
                     logger.info("Chat initialized: " + time.strftime("%a, %d %b %Y %H:%M:%S"))
+                    self.webkicks.send_message(Outgoing("Hallo! (wkQB 5.0, https://wkqb.de)"))
 
                     # here we can initialize some things, cause we got the first chat message
                     self.schedule_quotes()
