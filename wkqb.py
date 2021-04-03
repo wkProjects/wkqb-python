@@ -1,3 +1,4 @@
+from datetime import datetime
 import json
 import logging
 import os
@@ -7,6 +8,7 @@ import signal
 import threading
 import time
 
+from croniter import croniter
 import schedule
 
 from chatmessage import Level, Outgoing
@@ -28,6 +30,8 @@ class WKQB:
         self.hangman = None
         self.wordmix = None
         self.timebomb = None
+        self.quote_cron = None
+        self.next_quote = None
 
         signal.signal(signal.SIGHUP, self.handle_signal)
         signal.signal(signal.SIGINT, self.handle_signal)
@@ -52,7 +56,7 @@ class WKQB:
                     self.webkicks.send_message(Outgoing("Hallo! (wkQB 5.0, https://wkqb.de)"))
 
                     # here we can initialize some things, cause we got the first chat message
-                    self.schedule_quotes()
+                    schedule.every(5).seconds.do(self.send_random_quote).tag("quotes")
 
                     # starting the event loop in a separate thread
                     ev_loop = threading.Thread(target=self.event_loop, daemon=True)
@@ -104,8 +108,8 @@ class WKQB:
                 elif command.cmd == Command.Commands.RELOAD:
                     if chat_message.level >= Level.MOD:
                         self.config = self.load_settings()
-                        schedule.clear("quotes")
-                        self.schedule_quotes()
+                        self.quote_cron = croniter(self.config.quote.cron, datetime.now(), ret_type=datetime, max_years_between_matches=5)
+                        self.next_quote = self.quote_cron.get_next()
                         self.webkicks.send_message(Outgoing("Einstellungen neu geladen!"))
 
                 elif command.cmd == Command.Commands.QUIT:
@@ -243,10 +247,9 @@ class WKQB:
         self.webkicks.send_delayed(greeting, 5)
 
     def send_random_quote(self):
-        self.webkicks.send_message(Outgoing(" ".join([self.config.quote.prefix, random.choice(self.config.quote.quotes), self.config.quote.suffix]).strip()))
-
-    def schedule_quotes(self):
-        schedule.every(self.config.quote.interval).minutes.do(self.send_random_quote).tag("quotes")
+        if self.next_quote < datetime.now():
+            self.next_quote = self.quote_cron.get_next()
+            self.webkicks.send_message(Outgoing(" ".join([self.config.quote.prefix, random.choice(self.config.quote.quotes), self.config.quote.suffix]).strip()))
 
     def is_ignored(self, username):
         return username.lower() in map(str.lower, self.config.users.ignored) and not self.is_mod(username.lower())

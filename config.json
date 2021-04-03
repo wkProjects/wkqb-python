@@ -1,6 +1,7 @@
 {
   "quote": {
     "interval": 15,
+    "cron": "*/5 * * * *",
     "prefix": "",
     "suffix": "",
     "quotes": [
