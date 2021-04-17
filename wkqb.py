@@ -247,7 +247,7 @@ class WKQB:
         self.webkicks.send_delayed(greeting, 5)
 
     def send_random_quote(self):
-        if self.next_quote < datetime.now():
+        if self.next_quote is None or self.next_quote < datetime.now():
             self.next_quote = self.quote_cron.get_next()
             self.webkicks.send_message(Outgoing(" ".join([self.config.quote.prefix, random.choice(self.config.quote.quotes), self.config.quote.suffix]).strip()))
 
