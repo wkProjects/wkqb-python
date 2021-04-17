@@ -1,5 +1,7 @@
 import logging
 import re
+import time
+
 from threading import Timer
 from urllib.parse import urlparse
 
@@ -144,7 +146,8 @@ class Webkicks:
         return self.stream_url
 
     def prevent_timeout(self):
-        self.http_client.get(self.chat_url + "/tok/" + self.username.lower() + "/" + self.sid + "/")
+        self.http_client.get(self.chat_url + "/tok/" + self.username.lower() +
+                             "/" + self.sid + "/" + str(round(time.time() * 1000)))
 
     def parse_message(self, message):
         chat_message = None
