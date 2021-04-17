@@ -30,8 +30,6 @@ class WKQB:
         self.hangman = None
         self.wordmix = None
         self.timebomb = None
-        self.quote_cron = None
-        self.next_quote = None
 
         signal.signal(signal.SIGHUP, self.handle_signal)
         signal.signal(signal.SIGINT, self.handle_signal)
@@ -108,8 +106,6 @@ class WKQB:
                 elif command.cmd == Command.Commands.RELOAD:
                     if chat_message.level >= Level.MOD:
                         self.config = self.load_settings()
-                        self.quote_cron = croniter(self.config.quote.cron, datetime.now(), ret_type=datetime, max_years_between_matches=5)
-                        self.next_quote = self.quote_cron.get_next()
                         self.webkicks.send_message(Outgoing("Einstellungen neu geladen!"))
 
                 elif command.cmd == Command.Commands.QUIT:
@@ -284,9 +280,11 @@ class WKQB:
         self.timebomb = None
         schedule.clear("timebomb")
 
-    @staticmethod
-    def load_settings():
-        return json.load(open("config.json", "r", encoding="utf-8"), object_hook=Generic.from_dict)
+    def load_settings(self):
+        settings = json.load(open("config.json", "r", encoding="utf-8"), object_hook=Generic.from_dict)
+        self.quote_cron = croniter(settings.quote.cron, datetime.now(), ret_type=datetime, max_years_between_matches=5)
+        self.next_quote = self.quote_cron.get_next()
+        return settings
 
     @staticmethod
     def event_loop():
