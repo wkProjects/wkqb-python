@@ -16,6 +16,7 @@ class Command:
         WORDMIX = "wordmix"
         TIMEBOMB = "zeitbombe"
         CUT = "schneide"
+        QUIZ = "quiz"
 
     def __init__(self, cmd, param_string=""):
         self.cmd = cmd

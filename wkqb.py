@@ -15,6 +15,7 @@ from chatmessage import Level, Outgoing
 from commands import Command
 from config import Generic
 from games import Hangman, Timebomb, Wordmix
+from quiz import Quiz
 from webkicks import Webkicks
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class WKQB:
         self.hangman = None
         self.wordmix = None
         self.timebomb = None
+        self.quiz = None
 
         signal.signal(signal.SIGHUP, self.handle_signal)
         signal.signal(signal.SIGINT, self.handle_signal)
@@ -182,6 +184,11 @@ class WKQB:
                         if not self.wordmix.running:
                             schedule.clear("wordmix")
                             self.wordmix = None
+
+                elif command.cmd == Command.Commands.QUIZ:
+                    if not self.quiz:
+                        self.quiz = Quiz(self.webkicks, self.config.quiz)
+                    self.quiz.handle(chat_message)
 
                 elif command.cmd in [Command.Commands.TIMEBOMB, Command.Commands.CUT]:
                     if command.cmd == Command.Commands.TIMEBOMB:

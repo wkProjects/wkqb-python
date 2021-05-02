@@ -97,5 +97,36 @@
       "Fleisch",
       "Gemüse"
     ]
+  },
+  "quiz": {
+    "show_solution": true,
+    "quizzes": [
+      {
+        "name": "Testquiz",
+        "questions": [
+          {
+            "question": "Wie macht die Kuh?",
+            "answer": "Muh"
+          },
+          {
+            "question": "Wie macht die Katze?",
+            "answer": "Miau"
+          }
+        ]
+      },
+      {
+        "name": "Testquiz 2",
+        "questions": [
+          {
+            "question": "Wie macht der Hund?",
+            "answer": "Wuff"
+          },
+          {
+            "question": "Wie macht der Frosch?",
+            "answer": "Quak"
+          }
+        ]
+      }
+    ]
   }
 }
