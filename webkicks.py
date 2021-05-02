@@ -124,12 +124,18 @@ class Webkicks:
 
     def send_message(self, message: chatmessage.Outgoing):
         # to support sending multiple messages we make sure that we have a list, even if it only contains one element
-        messages = message.message if isinstance(message.message, list) else [message.message]
+        messages = message.message if isinstance(
+            message.message, list) else [message.message]
 
         for message in messages:
-            self.http_client.post(self.send_url,
-                                  data={"user": self.username, "pass": self.sid, "cid": self.cid,
-                                        "message": message.encode("iso-8859-1", "replace")})
+            if message is not None:
+                data = {
+                    "user": self.username,
+                    "pass": self.sid,
+                    "cid": self.cid,
+                    "message": message.encode("iso-8859-1", "replace")
+                }
+                self.http_client.post(self.send_url, data=data)
 
     def send_delayed(self, message: chatmessage.Outgoing, delay: int):
         Timer(float(delay), self.send_message, [message]).start()

@@ -52,6 +52,9 @@ class Outgoing:
             self.message = self.replace_tokens(message, replacements)
 
     def replace_tokens(self, message, replacements: Dict[str, any]):
+        if message is None:
+            return None
+
         # the %RANDOM% token has to be handled specially, as it wouldn't be random otherwise
         message = re.sub('%RANDOM%', str(random.random()), message, 0, re.IGNORECASE)
 
