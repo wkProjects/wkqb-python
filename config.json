@@ -13,6 +13,14 @@
       "Maus"
     ]
   },
+  "calendar": {
+    "entries": [
+      {
+        "schedule": "* * * * *",
+        "message": "Minütlicher Kalendereintrag"
+      }
+    ]
+  },
   "greeting": {
     "hello": "Hallo %USER%!",
     "wb": "Willkommen zurück, %USER%!",
