@@ -26,12 +26,13 @@ class WKQB:
     def __init__(self):
         self.webkicks = Webkicks(os.environ.get("WK_CHATURL"), username=os.environ.get("WK_USERNAME"),
                                  password=os.environ.get("WK_PASSWORD"))
-        self.config = self.load_settings()
         self.user_list = {}
         self.hangman = None
         self.wordmix = None
         self.timebomb = None
         self.quiz = None
+        self.calendar = None
+        self.config = self.load_settings()
 
         signal.signal(signal.SIGHUP, self.handle_signal)
         signal.signal(signal.SIGINT, self.handle_signal)
@@ -56,7 +57,7 @@ class WKQB:
                     self.webkicks.send_message(Outgoing("Hallo! (wkQB 5.0, https://wkqb.de)"))
 
                     # here we can initialize some things, cause we got the first chat message
-                    schedule.every(5).seconds.do(self.send_random_quote).tag("quotes")
+                    schedule.every(10).seconds.do(self.send_scheduled_messages).tag("scheduled_messages")
 
                     # starting the event loop in a separate thread
                     ev_loop = threading.Thread(target=self.event_loop, daemon=True)
@@ -78,7 +79,8 @@ class WKQB:
                     self.handle_message(chat_message)
 
         # stream is closed, time to cleanup
-        pass
+        self.webkicks = None
+        schedule.clear()
 
     def handle_message(self, chat_message):
         if chat_message:
@@ -250,9 +252,19 @@ class WKQB:
         self.webkicks.send_delayed(greeting, 5)
 
     def send_random_quote(self):
-        if self.next_quote is None or self.next_quote < datetime.now():
+        if self.next_quote is None or self.next_quote <= datetime.now():
             self.next_quote = self.quote_cron.get_next()
             self.webkicks.send_message(Outgoing(" ".join([self.config.quote.prefix, random.choice(self.config.quote.quotes), self.config.quote.suffix]).strip()))
+
+    def send_calendar_events(self):
+        for entry in self.calendar:
+            if entry["next"] is None or entry["next"] <= datetime.now():
+                entry["next"] = entry["cron"].get_next()
+                self.webkicks.send_message(Outgoing(entry["message"]))
+
+    def send_scheduled_messages(self):
+        self.send_random_quote()
+        self.send_calendar_events()
 
     def is_ignored(self, username):
         return username.lower() in map(str.lower, self.config.users.ignored) and not self.is_mod(username.lower())
@@ -291,6 +303,14 @@ class WKQB:
         settings = json.load(open("config.json", "r", encoding="utf-8"), object_hook=Generic.from_dict)
         self.quote_cron = croniter(settings.quote.cron, datetime.now(), ret_type=datetime, max_years_between_matches=5)
         self.next_quote = self.quote_cron.get_next()
+        self.calendar = [
+            {
+                "message": entry.message,
+                "cron": (cron := croniter(entry.schedule, datetime.now(), ret_type=datetime, max_years_between_matches=5)),
+                "next": cron.get_next()
+            }
+            for entry in settings.calendar.entries
+        ]
         return settings
 
     @staticmethod
