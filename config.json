@@ -1,9 +1,10 @@
 {
+  "jointext": "I am back!",
   "quote": {
     "interval": 15,
     "cron": "*/5 * * * *",
     "prefix": "",
-    "suffix": "",
+    "suffix": "[%THIS%/%TOTAL%]",
     "quotes": [
       "Quote 1",
       "Quote 2",
