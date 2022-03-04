@@ -58,6 +58,15 @@ class Outgoing:
         # the %RANDOM% token has to be handled specially, as it wouldn't be random otherwise
         message = re.sub('%RANDOM%', str(random.random()), message, 0, re.IGNORECASE)
 
+        # the R{str%OR%str}/R syntax chooses one of the given messages
+        random_pattern = re.compile(r'(R\{(.+?)\}/R)')
+
+        while random_pattern.search(message):
+            randoms = random_pattern.search(message)
+            if randoms and randoms.group(2):
+                parts = randoms.group(2).split('%OR%')
+                message = message.replace(randoms.group(1), random.choice(parts))
+
         # now we can replace the "normal" tokens
         for k, v in replacements.items():
             pattern = re.compile(re.escape("%" + k + "%"), re.IGNORECASE)
