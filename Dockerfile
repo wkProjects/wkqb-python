@@ -1,4 +1,7 @@
-FROM python:3.9-alpine
+FROM python:3.10-alpine
+
+RUN apk add --no-cache tini
+ENTRYPOINT ["/sbin/tini", "--"]
 
 WORKDIR /usr/src/app
 
