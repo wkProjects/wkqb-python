@@ -264,7 +264,9 @@ class WKQB:
 
     def send_random_quote(self):
         if len(self.config.quote.quotes) > 0:
-            self.webkicks.send_message(Outgoing(" ".join([self.config.quote.prefix, random.choice(self.config.quote.quotes), self.config.quote.suffix]).strip()))
+            quote_index = random.choice(range(len(self.config.quote.quotes)))
+            self.webkicks.send_message(Outgoing(" ".join([self.config.quote.prefix, self.config.quote.quotes[quote_index], self.config.quote.suffix]).strip(),
+                                                replacements={"this": quote_index+1, "total": len(self.config.quote.quotes)}))
 
     def send_calendar_events(self):
         for entry in self.calendar:
