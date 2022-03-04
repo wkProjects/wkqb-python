@@ -310,7 +310,13 @@ class WKQB:
         schedule.clear("timebomb")
 
     def load_settings(self):
-        settings = json.load(open("config.json", "r", encoding="utf-8"), object_hook=Generic.from_dict)
+        if os.environ.get("WKQB_CONFIG_FILE"):
+            settings = json.load(open(os.environ.get("WKQB_CONFIG_FILE"), "r", encoding="utf-8"), object_hook=Generic.from_dict)
+        elif os.environ.get("WKQB_CONFIG_URL"):
+            settings = json.loads(self.webkicks.http_client.get(os.environ.get("WKQB_CONFIG_URL")).text, object_hook=Generic.from_dict)
+        else:
+            settings = json.load(open("config.json", "r", encoding="utf-8"), object_hook=Generic.from_dict)
+
         self.quote_cron = croniter(settings.quote.cron, datetime.now(), ret_type=datetime, max_years_between_matches=5)
         self.next_quote = self.quote_cron.get_next()
         self.calendar = [
