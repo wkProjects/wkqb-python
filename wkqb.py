@@ -252,11 +252,14 @@ class WKQB:
         greeting = Outgoing(message, replacements={"user": username})
         self.webkicks.send_delayed(greeting, 5)
 
-    def send_random_quote(self):
+    def send_scheduled_quote(self):
         if self.next_quote is None or self.next_quote <= datetime.now():
             self.next_quote = self.quote_cron.get_next()
-            if len(self.config.quote.quotes) > 0:
-                self.webkicks.send_message(Outgoing(" ".join([self.config.quote.prefix, random.choice(self.config.quote.quotes), self.config.quote.suffix]).strip()))
+            self.send_random_quote()
+
+    def send_random_quote(self):
+        if len(self.config.quote.quotes) > 0:
+            self.webkicks.send_message(Outgoing(" ".join([self.config.quote.prefix, random.choice(self.config.quote.quotes), self.config.quote.suffix]).strip()))
 
     def send_calendar_events(self):
         for entry in self.calendar:
@@ -265,7 +268,7 @@ class WKQB:
                 self.webkicks.send_message(Outgoing(entry["message"]))
 
     def send_scheduled_messages(self):
-        self.send_random_quote()
+        self.send_scheduled_quote()
         self.send_calendar_events()
 
     def is_ignored(self, username):
