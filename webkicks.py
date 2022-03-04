@@ -163,21 +163,29 @@ class Webkicks:
         if m.search(Webkicks.Pattern.LOGINMESSAGE):
             chat_message = chatmessage.Incoming(m.group(2), "")
             chat_message.type = self.Type.LOGIN
+
         elif m.search(Webkicks.Pattern.LOGOUTMESSAGE):
             chat_message = chatmessage.Incoming(m.group(2), "")
             chat_message.type = self.Type.LOGOUT
+
         elif m.search(Webkicks.Pattern.CHATMESSAGE):
             chat_message = chatmessage.Incoming(m.group(2), m.group(3))
+            chat_message.type = self.Type.CHATMESSAGE
             logger.debug("Normal: " + str(chat_message))
+
         elif m.search(Webkicks.Pattern.WHISPERMESSAGE):
             chat_message = chatmessage.Incoming(m.group(2), m.group(3))
+            chat_message.type = self.Type.WHISPERMESSAGE
             logger.debug("Geflüstert: " + str(chat_message))
+
         elif m.search(Webkicks.Pattern.COMMENT):
             chat_message = chatmessage.Incoming(m.group(2), m.group(3))
             logger.debug("Comment: " + str(chat_message))
+
         elif m.search(Webkicks.Pattern.CHATBOTPM) or m.search(Webkicks.Pattern.CHATBOTMESSAGE):
             chat_message = chatmessage.Incoming(m.group(2), m.group(3))
             logger.debug("Chat-Bot: " + str(chat_message))
+
         elif m.search(Webkicks.Pattern.CHANNELSWITCH):
             # skipping channel switches
             pass

@@ -218,10 +218,15 @@ class WKQB:
                     # here we handle custom commands
                     for cmd in self.config.commands.list:
                         if cmd.command == command.cmd and chat_message.level >= cmd.min_level:
-                            self.webkicks.send_message(Outgoing(cmd.reaction,
-                                                                replacements={"user": chat_message.user,
-                                                                              "param": command.param_string}))
-                            break
+                            if cmd.whisper_mode == 2 or \
+                                (cmd.whisper_mode == 0 and chat_message.type != Webkicks.Type.WHISPERMESSAGE) or \
+                                (cmd.whisper_mode == 1 and chat_message.type == Webkicks.Type.WHISPERMESSAGE):
+
+                                self.webkicks.send_message(Outgoing(cmd.reaction,
+                                                                    replacements={"user": chat_message.user,
+                                                                                "param": command.param_string}))
+                                break
+
             else:
                 # no we do the pattern matching, based on the conditions provided
                 for entry in self.config.pattern.list:
