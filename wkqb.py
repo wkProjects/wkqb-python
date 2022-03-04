@@ -50,7 +50,8 @@ class WKQB:
             stream.encoding = 'utf-8'
 
         # now we listen for chat messages, as long as the stream is open
-        for line in stream.iter_lines(decode_unicode=True):
+        for line in stream.iter_content(chunk_size=None, decode_unicode=True):
+            logger.debug(line)
             if line:
                 if self.webkicks.Pattern.UPDATE.match(line) and not chat_started:
                     logger.info("Chat initialized: " + time.strftime("%a, %d %b %Y %H:%M:%S"))
