@@ -91,9 +91,13 @@ class WKQB:
             if chat_message.level == Level.IGNORED:
                 # we also ignore ignored users, obviously
                 return
+            if self.config.guest_mode == 0 and chat_message.level == Level.GUEST:
+                # if we ignore guests but the message comes from a guest we must ignore it
+                return
             if chat_message.type == Webkicks.Type.LOGIN:
                 logger.debug(chat_message.user + " logged in!")
-                self.handle_user_login(chat_message.user)
+                if self.config.guest_mode > 1 or chat_message.level > Level.GUEST:
+                    self.handle_user_login(chat_message.user)
 
             elif chat_message.type == Webkicks.Type.LOGOUT:
                 # we dont handle logouts for now

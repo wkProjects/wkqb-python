@@ -1,4 +1,5 @@
 {
+  "guest_mode": 0,
   "jointext": "I am back!",
   "quote": {
     "interval": 15,
