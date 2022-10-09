@@ -85,7 +85,7 @@ class Webkicks:
 
     def __init__(self, chat_url, **kwargs):
         self.http_client = requests.Session()
-        self.http_client.headers.update({"User-Agent": "wkQB 5.0 'Python'"})
+        self.http_client.headers.update({"User-Agent": "wkQB 5.0 (https://wkqb.de)"})
 
         self.username = kwargs.get("username")
         self.password = kwargs.get("password")
