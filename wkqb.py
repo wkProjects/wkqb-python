@@ -170,9 +170,12 @@ class WKQB:
 
                 elif command.cmd == Command.Commands.HANGMAN:
                     if not self.hangman:
-                        self.hangman = Hangman(self.config.hangman)
-                        schedule.every(1).minutes.do(self.hangman_timeout).tag("hangman")
-                        self.webkicks.send_message(Outgoing(self.hangman.start()))
+                        if len(self.config.hangman.words) > 0:
+                            self.hangman = Hangman(self.config.hangman)
+                            schedule.every(1).minutes.do(self.hangman_timeout).tag("hangman")
+                            self.webkicks.send_message(Outgoing(self.hangman.start()))
+                        else:
+                            self.webkicks.send_message(Outgoing("Ich habe leider keine Wörter :-("))
                     else:
                         self.webkicks.send_message(Outgoing(self.hangman.handle(chat_message)))
                         schedule.clear("hangman")
@@ -183,9 +186,12 @@ class WKQB:
 
                 elif command.cmd == Command.Commands.WORDMIX:
                     if not self.wordmix:
-                        self.wordmix = Wordmix(self.config.wordmix)
-                        schedule.every(2).minutes.do(self.wordmix_timeout).tag("wordmix")
-                        self.webkicks.send_message(Outgoing(self.wordmix.start()))
+                        if len(self.config.wordmix.words) > 0:
+                            self.wordmix = Wordmix(self.config.wordmix)
+                            schedule.every(2).minutes.do(self.wordmix_timeout).tag("wordmix")
+                            self.webkicks.send_message(Outgoing(self.wordmix.start()))
+                        else:
+                            self.webkicks.send_message(Outgoing("Ich habe leider keine Wörter :-("))
                     else:
                         self.webkicks.send_message(Outgoing(self.wordmix.handle(chat_message)))
                         if not self.wordmix.running:
