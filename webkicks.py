@@ -103,12 +103,16 @@ class Webkicks:
         schedule.every(15).minutes.do(self.prevent_timeout)
 
     def sid_from_api(self):
-        return self.http_client.post(self.chat_url + '/api', data={
+        api_response = self.http_client.post(self.chat_url + '/api', data={
             'cid': self.cid,
             'user': self.username.lower(),
             'pass': self.password,
             'job': 'get_sid'
-        }).json()["sid"]
+        }).json()
+        if "sid" in api_response:
+            return api_response["sid"]
+        else:
+            logger.error("Konnte SID nicht ermitteln.")
 
     def sid_from_password(self, password):
         return des_crypt.hash(password, salt="88")
