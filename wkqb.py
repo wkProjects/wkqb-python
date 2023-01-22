@@ -170,6 +170,7 @@ class WKQB:
 
                 elif command.cmd == Command.Commands.HANGMAN:
                     if not self.hangman:
+                        # TODO: Fix!
                         if len(self.config.hangman.words) > 0:
                             self.hangman = Hangman(self.config.hangman)
                             schedule.every(1).minutes.do(self.hangman_timeout).tag("hangman")
@@ -186,6 +187,7 @@ class WKQB:
 
                 elif command.cmd == Command.Commands.WORDMIX:
                     if not self.wordmix:
+                        # TODO: Fix!
                         if len(self.config.wordmix.words) > 0:
                             self.wordmix = Wordmix(self.config.wordmix)
                             schedule.every(2).minutes.do(self.wordmix_timeout).tag("wordmix")
@@ -224,7 +226,7 @@ class WKQB:
                         schedule.clear("timebomb")
                         self.timebomb = None
 
-                else:
+                elif command.cmd in [cmd.command for cmd in self.config.commands.list]:
                     # here we handle custom commands
                     for cmd in self.config.commands.list:
                         if cmd.command == command.cmd and chat_message.level >= cmd.min_level:
@@ -236,6 +238,8 @@ class WKQB:
                                                                     replacements={"user": chat_message.user,
                                                                                 "param": command.param_string}))
                                 break
+                else:
+                    self.webkicks.send_message(Outgoing("Den Befehl kenne ich leider nicht :-("))
 
             else:
                 # no we do the pattern matching, based on the conditions provided
