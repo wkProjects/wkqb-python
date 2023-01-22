@@ -55,7 +55,7 @@ class WKQB:
             if line:
                 if self.webkicks.Pattern.UPDATE.match(line) and not chat_started:
                     logger.info("Chat initialized: " + time.strftime("%a, %d %b %Y %H:%M:%S"))
-                    self.webkicks.send_message(Outgoing("Hallo! (wkQB 5.0, https://wkqb.de)"))
+                    self.webkicks.send_message(Outgoing(f"{self.config.jointext} (wkQB 5.0, https://wkqb.de)"))
 
                     # here we can initialize some things, cause we got the first chat message
                     schedule.every(10).seconds.do(self.send_scheduled_messages).tag("scheduled_messages")
@@ -91,9 +91,13 @@ class WKQB:
             if chat_message.level == Level.IGNORED:
                 # we also ignore ignored users, obviously
                 return
+            if self.config.guest_mode == 0 and chat_message.level == Level.GUEST:
+                # if we ignore guests but the message comes from a guest we must ignore it
+                return
             if chat_message.type == Webkicks.Type.LOGIN:
                 logger.debug(chat_message.user + " logged in!")
-                self.handle_user_login(chat_message.user)
+                if self.config.guest_mode > 1 or chat_message.level > Level.GUEST:
+                    self.handle_user_login(chat_message.user)
 
             elif chat_message.type == Webkicks.Type.LOGOUT:
                 # we dont handle logouts for now
@@ -166,9 +170,12 @@ class WKQB:
 
                 elif command.cmd == Command.Commands.HANGMAN:
                     if not self.hangman:
-                        self.hangman = Hangman(self.config.hangman)
-                        schedule.every(1).minutes.do(self.hangman_timeout).tag("hangman")
-                        self.webkicks.send_message(Outgoing(self.hangman.start()))
+                        if len(self.config.hangman.words) > 0:
+                            self.hangman = Hangman(self.config.hangman)
+                            schedule.every(1).minutes.do(self.hangman_timeout).tag("hangman")
+                            self.webkicks.send_message(Outgoing(self.hangman.start()))
+                        else:
+                            self.webkicks.send_message(Outgoing("Ich habe leider keine Wörter :-("))
                     else:
                         self.webkicks.send_message(Outgoing(self.hangman.handle(chat_message)))
                         schedule.clear("hangman")
@@ -179,9 +186,12 @@ class WKQB:
 
                 elif command.cmd == Command.Commands.WORDMIX:
                     if not self.wordmix:
-                        self.wordmix = Wordmix(self.config.wordmix)
-                        schedule.every(2).minutes.do(self.wordmix_timeout).tag("wordmix")
-                        self.webkicks.send_message(Outgoing(self.wordmix.start()))
+                        if len(self.config.wordmix.words) > 0:
+                            self.wordmix = Wordmix(self.config.wordmix)
+                            schedule.every(2).minutes.do(self.wordmix_timeout).tag("wordmix")
+                            self.webkicks.send_message(Outgoing(self.wordmix.start()))
+                        else:
+                            self.webkicks.send_message(Outgoing("Ich habe leider keine Wörter :-("))
                     else:
                         self.webkicks.send_message(Outgoing(self.wordmix.handle(chat_message)))
                         if not self.wordmix.running:
@@ -218,10 +228,15 @@ class WKQB:
                     # here we handle custom commands
                     for cmd in self.config.commands.list:
                         if cmd.command == command.cmd and chat_message.level >= cmd.min_level:
-                            self.webkicks.send_message(Outgoing(cmd.reaction,
-                                                                replacements={"user": chat_message.user,
-                                                                              "param": command.param_string}))
-                            break
+                            if cmd.whisper_mode == 2 or \
+                                (cmd.whisper_mode == 0 and chat_message.type != Webkicks.Type.WHISPERMESSAGE) or \
+                                (cmd.whisper_mode == 1 and chat_message.type == Webkicks.Type.WHISPERMESSAGE):
+
+                                self.webkicks.send_message(Outgoing(cmd.reaction,
+                                                                    replacements={"user": chat_message.user,
+                                                                                "param": command.param_string}))
+                                break
+
             else:
                 # no we do the pattern matching, based on the conditions provided
                 for entry in self.config.pattern.list:
@@ -252,10 +267,16 @@ class WKQB:
         greeting = Outgoing(message, replacements={"user": username})
         self.webkicks.send_delayed(greeting, 5)
 
-    def send_random_quote(self):
+    def send_scheduled_quote(self):
         if self.next_quote is None or self.next_quote <= datetime.now():
             self.next_quote = self.quote_cron.get_next()
-            self.webkicks.send_message(Outgoing(" ".join([self.config.quote.prefix, random.choice(self.config.quote.quotes), self.config.quote.suffix]).strip()))
+            self.send_random_quote()
+
+    def send_random_quote(self):
+        if len(self.config.quote.quotes) > 0:
+            quote_index = random.choice(range(len(self.config.quote.quotes)))
+            self.webkicks.send_message(Outgoing(" ".join([self.config.quote.prefix, self.config.quote.quotes[quote_index], self.config.quote.suffix]).strip(),
+                                                replacements={"this": quote_index+1, "total": len(self.config.quote.quotes)}))
 
     def send_calendar_events(self):
         for entry in self.calendar:
@@ -264,7 +285,7 @@ class WKQB:
                 self.webkicks.send_message(Outgoing(entry["message"]))
 
     def send_scheduled_messages(self):
-        self.send_random_quote()
+        self.send_scheduled_quote()
         self.send_calendar_events()
 
     def is_ignored(self, username):
@@ -301,7 +322,13 @@ class WKQB:
         schedule.clear("timebomb")
 
     def load_settings(self):
-        settings = json.load(open("config.json", "r", encoding="utf-8"), object_hook=Generic.from_dict)
+        if os.environ.get("WKQB_CONFIG_FILE"):
+            settings = json.load(open(os.environ.get("WKQB_CONFIG_FILE"), "r", encoding="utf-8"), object_hook=Generic.from_dict)
+        elif os.environ.get("WKQB_CONFIG_URL"):
+            settings = json.loads(self.webkicks.http_client.get(os.environ.get("WKQB_CONFIG_URL")).text, object_hook=Generic.from_dict)
+        else:
+            settings = json.load(open("config.json", "r", encoding="utf-8"), object_hook=Generic.from_dict)
+
         self.quote_cron = croniter(settings.quote.cron, datetime.now(), ret_type=datetime, max_years_between_matches=5)
         self.next_quote = self.quote_cron.get_next()
         self.calendar = [

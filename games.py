@@ -79,7 +79,7 @@ class Wordmix:
         self.running = True
         self.remaining = 10
 
-        self.word: str = random.choice(config.words)
+        self.word: str = random.choice(config.words).lower()
         self.shuffled: str = ''.join(random.sample(self.word, len(self.word)))
 
     def start(self):

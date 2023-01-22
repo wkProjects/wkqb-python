@@ -1,9 +1,11 @@
 {
+  "guest_mode": 0,
+  "jointext": "I am back!",
   "quote": {
     "interval": 15,
     "cron": "*/5 * * * *",
     "prefix": "",
-    "suffix": "",
+    "suffix": "[%THIS%/%TOTAL%]",
     "quotes": [
       "Quote 1",
       "Quote 2",
@@ -46,12 +48,20 @@
       {
         "command": "test",
         "reaction": "Erfolgreich!",
-        "min_level": 1
+        "min_level": 1,
+        "whisper_mode": 0
       },
       {
         "command": "random",
         "reaction": ["%RANDOM%", "%RANDOM%"],
-        "min_level": 2
+        "min_level": 2,
+        "whisper_mode": 1
+      },
+      {
+        "command": "parts",
+        "reaction": "Hallo R{Erde%OR%Welt}/R! Grüße von R{Tom%OR%Jerry}/R",
+        "min_level": 1,
+        "whisper_mode": 2
       }
     ]
   },

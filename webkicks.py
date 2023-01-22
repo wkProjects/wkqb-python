@@ -85,7 +85,7 @@ class Webkicks:
 
     def __init__(self, chat_url, **kwargs):
         self.http_client = requests.Session()
-        self.http_client.headers.update({"User-Agent": "wkQB 5.0 'Python'"})
+        self.http_client.headers.update({"User-Agent": "wkQB 5.0 (https://wkqb.de)"})
 
         self.username = kwargs.get("username")
         self.password = kwargs.get("password")
@@ -103,12 +103,16 @@ class Webkicks:
         schedule.every(15).minutes.do(self.prevent_timeout)
 
     def sid_from_api(self):
-        return self.http_client.post(self.chat_url + '/api', data={
+        api_response = self.http_client.post(self.chat_url + '/api', data={
             'cid': self.cid,
             'user': self.username.lower(),
             'pass': self.password,
             'job': 'get_sid'
-        }).json()["sid"]
+        }).json()
+        if "sid" in api_response:
+            return api_response["sid"]
+        else:
+            logger.error("Konnte SID nicht ermitteln.")
 
     def sid_from_password(self, password):
         return des_crypt.hash(password, salt="88")
@@ -163,21 +167,29 @@ class Webkicks:
         if m.search(Webkicks.Pattern.LOGINMESSAGE):
             chat_message = chatmessage.Incoming(m.group(2), "")
             chat_message.type = self.Type.LOGIN
+
         elif m.search(Webkicks.Pattern.LOGOUTMESSAGE):
             chat_message = chatmessage.Incoming(m.group(2), "")
             chat_message.type = self.Type.LOGOUT
+
         elif m.search(Webkicks.Pattern.CHATMESSAGE):
             chat_message = chatmessage.Incoming(m.group(2), m.group(3))
+            chat_message.type = self.Type.CHATMESSAGE
             logger.debug("Normal: " + str(chat_message))
+
         elif m.search(Webkicks.Pattern.WHISPERMESSAGE):
             chat_message = chatmessage.Incoming(m.group(2), m.group(3))
+            chat_message.type = self.Type.WHISPERMESSAGE
             logger.debug("Geflüstert: " + str(chat_message))
+
         elif m.search(Webkicks.Pattern.COMMENT):
             chat_message = chatmessage.Incoming(m.group(2), m.group(3))
             logger.debug("Comment: " + str(chat_message))
+
         elif m.search(Webkicks.Pattern.CHATBOTPM) or m.search(Webkicks.Pattern.CHATBOTMESSAGE):
             chat_message = chatmessage.Incoming(m.group(2), m.group(3))
             logger.debug("Chat-Bot: " + str(chat_message))
+
         elif m.search(Webkicks.Pattern.CHANNELSWITCH):
             # skipping channel switches
             pass
