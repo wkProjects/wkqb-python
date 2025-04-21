@@ -1,7 +1,6 @@
 import logging
 import re
 import time
-
 from threading import Timer
 from urllib.parse import urlparse
 
@@ -97,7 +96,7 @@ class Webkicks:
         self.sid = self.sid_from_api()
         self.send_url = self.server_url + "/cgi-bin/chat.cgi"
         self.stream_frame_url = self.chat_url + "/chatstream/" + \
-            self.username + "/" + self.sid + "/start"
+                                self.username + "/" + self.sid + "/start"
         self.stream_url = ''
 
         schedule.every(15).minutes.do(self.prevent_timeout)
@@ -139,7 +138,7 @@ class Webkicks:
                     "cid": self.cid,
                     "message": message.encode("iso-8859-1", "replace")
                 }
-                self.http_client.post(self.send_url, data=data)
+                self.http_client.post(self.send_url, data=data, stream=False)
 
     def send_delayed(self, message: chatmessage.Outgoing, delay: int):
         Timer(float(delay), self.send_message, [message]).start()

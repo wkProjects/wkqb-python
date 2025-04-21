@@ -1,15 +1,16 @@
-from datetime import datetime
 import json
 import logging
 import os
 import random
 import re
 import signal
+import sys
 import threading
 import time
+from datetime import datetime
 
-from croniter import croniter
 import schedule
+from croniter import croniter
 
 from chatmessage import Level, Outgoing
 from commands import Command
@@ -40,7 +41,11 @@ class WKQB:
 
     def run(self):
 
-        self.webkicks.login()
+        try:
+            self.webkicks.login()
+        except Exception as e:
+            sys.exit(1)
+
         stream_url = self.webkicks.get_stream_url()
 
         chat_started = False
@@ -231,12 +236,11 @@ class WKQB:
                     for cmd in self.config.commands.list:
                         if cmd.command == command.cmd and chat_message.level >= cmd.min_level:
                             if cmd.whisper_mode == 2 or \
-                                (cmd.whisper_mode == 0 and chat_message.type != Webkicks.Type.WHISPERMESSAGE) or \
-                                (cmd.whisper_mode == 1 and chat_message.type == Webkicks.Type.WHISPERMESSAGE):
-
+                                    (cmd.whisper_mode == 0 and chat_message.type != Webkicks.Type.WHISPERMESSAGE) or \
+                                    (cmd.whisper_mode == 1 and chat_message.type == Webkicks.Type.WHISPERMESSAGE):
                                 self.webkicks.send_message(Outgoing(cmd.reaction,
                                                                     replacements={"user": chat_message.user,
-                                                                                "param": command.param_string}))
+                                                                                  "param": command.param_string}))
                                 break
                 else:
                     self.webkicks.send_message(Outgoing("Den Befehl kenne ich leider nicht :-("))
@@ -279,8 +283,10 @@ class WKQB:
     def send_random_quote(self):
         if len(self.config.quote.quotes) > 0:
             quote_index = random.choice(range(len(self.config.quote.quotes)))
-            self.webkicks.send_message(Outgoing(" ".join([self.config.quote.prefix, self.config.quote.quotes[quote_index], self.config.quote.suffix]).strip(),
-                                                replacements={"this": quote_index+1, "total": len(self.config.quote.quotes)}))
+            self.webkicks.send_message(Outgoing(" ".join(
+                [self.config.quote.prefix, self.config.quote.quotes[quote_index], self.config.quote.suffix]).strip(),
+                                                replacements={"this": quote_index + 1,
+                                                              "total": len(self.config.quote.quotes)}))
 
     def send_calendar_events(self):
         for entry in self.calendar:
@@ -327,9 +333,11 @@ class WKQB:
 
     def load_settings(self):
         if os.environ.get("WKQB_CONFIG_FILE"):
-            settings = json.load(open(os.environ.get("WKQB_CONFIG_FILE"), "r", encoding="utf-8"), object_hook=Generic.from_dict)
+            settings = json.load(open(os.environ.get("WKQB_CONFIG_FILE"), "r", encoding="utf-8"),
+                                 object_hook=Generic.from_dict)
         elif os.environ.get("WKQB_CONFIG_URL"):
-            settings = json.loads(self.webkicks.http_client.get(os.environ.get("WKQB_CONFIG_URL")).text, object_hook=Generic.from_dict)
+            settings = json.loads(self.webkicks.http_client.get(os.environ.get("WKQB_CONFIG_URL")).text,
+                                  object_hook=Generic.from_dict)
         else:
             settings = json.load(open("config.json", "r", encoding="utf-8"), object_hook=Generic.from_dict)
 
@@ -338,7 +346,8 @@ class WKQB:
         self.calendar = [
             {
                 "message": entry.message,
-                "cron": (cron := croniter(entry.schedule, datetime.now(), ret_type=datetime, max_years_between_matches=5)),
+                "cron": (
+                    cron := croniter(entry.schedule, datetime.now(), ret_type=datetime, max_years_between_matches=5)),
                 "next": cron.get_next()
             }
             for entry in settings.calendar.entries
