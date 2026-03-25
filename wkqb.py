@@ -44,6 +44,7 @@ class WKQB:
         try:
             self.webkicks.login()
         except Exception as e:
+            logging.error(e)
             sys.exit(1)
 
         stream_url = self.webkicks.get_stream_url()
