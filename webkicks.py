@@ -136,7 +136,7 @@ class Webkicks:
                     "user": self.username,
                     "pass": self.sid,
                     "cid": self.cid,
-                    "message": message.encode("iso-8859-1", "replace")
+                    "message": message
                 }
                 self.http_client.post(self.send_url, data=data, stream=False)
 
