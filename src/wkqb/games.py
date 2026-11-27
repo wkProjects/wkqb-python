@@ -260,7 +260,7 @@ class Timebomb(Game):
         self.running = False
         if _same(wire, self.wire):
             return [f"{_e(self.victim)} hat die Bombe entschärft. Glückwunsch!"]
-        return ["Das war leider das falsche Kabel!"]
+        return [f"Das war leider das falsche Kabel! Richtig wäre <b>{self.wire}</b> gewesen."]
 
     def cheat(self, user: str) -> list[str]:
         """!cheat: a trap. The docs promise the right wire, but whoever has the bomb loses."""
@@ -271,7 +271,10 @@ class Timebomb(Game):
 
     def timeout(self, now: float) -> list[str]:
         self.running = False
-        return [f"{_e(self.victim)} hat es nicht rechtzeitig geschafft, die Bombe zu entschärfen :-("]
+        return [
+            f"{_e(self.victim)} hat es nicht rechtzeitig geschafft, die Bombe zu entschärfen :-( "
+            f"Richtig wäre <b>{self.wire}</b> gewesen."
+        ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,8 +382,13 @@ class HotPotato(Game):
         return [f"{_e(user)} spielt mit! ({len(self.players)} Spieler)"]
 
     def throw(self, user: str, now: float) -> list[str]:
-        if self.holder is None or not _same(user, self.holder):
-            return [f"{_e(user)}, du hast die Kartoffel doch gar nicht!"]
+        if self.holder is None:
+            return [f"{_e(user)}, das Spiel hat doch noch gar nicht angefangen!"]
+        if not any(_same(user, player) for player in self.players):
+            return [f"Du spielst nicht mit, {_e(user)}!"]
+        if not _same(user, self.holder):
+            # as in the Perl bot: throwing without the potato costs the game
+            return self._out(user, f"{_e(user)} hat sich verworfen und scheidet aus!", now)
         self.throws += 1
         if self.throws >= self.cold_after:
             self.running = False
@@ -394,12 +402,17 @@ class HotPotato(Game):
                 return [f"Für Heiße Kartoffel braucht es mindestens {POTATO_MIN_PLAYERS} Spieler, das Spiel fällt aus."]
             return [f"Es spielen mit: {_e(', '.join(self.players))}", *self._throw_to_someone(now)]
         loser = self.holder
+        return self._out(loser, f"{_e(loser)} war zu langsam und hat sich die Finger verbrannt!", now)
+
+    def _out(self, loser: str, why: str, now: float) -> list[str]:
         self.players = [player for player in self.players if not _same(player, loser)]
-        answer = [f"{_e(loser)} war zu langsam und hat sich die Finger verbrannt!"]
         if len(self.players) == 1:
             self.running = False
-            return [*answer, f"{_e(self.players[0])} hat gewonnen!"]
-        return [*answer, *self._throw_to_someone(now)]
+            return [why, f"{_e(self.players[0])} hat gewonnen!"]
+        if self.holder is not None and not _same(self.holder, loser):
+            # the potato stays where it is
+            return [why]
+        return [why, *self._throw_to_someone(now)]
 
     def _throw_to_someone(self, now: float) -> list[str]:
         self.holder = self.rng.choice(self.players)

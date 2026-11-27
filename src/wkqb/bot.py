@@ -23,7 +23,19 @@ from enum import IntEnum
 
 from wkqb import VERSION, cron
 from wkqb.config import Config, ConfigError, GuestMode, Pattern, WhisperMode
-from wkqb.events import Event, FloodWarning, Login, Logout, Message, RoomLeave, SystemMessage, Unparsed, Whisper
+from wkqb.events import (
+    Back,
+    Event,
+    FloodWarning,
+    Login,
+    Logout,
+    Message,
+    RoomEnter,
+    RoomLeave,
+    SystemMessage,
+    Unparsed,
+    Whisper,
+)
 from wkqb.games import Game, Hangman, HotPotato, Quiz, Timebomb, Wordmix, quiz_menu
 from wkqb.outbox import Outbox
 from wkqb.tokens import render
@@ -35,8 +47,8 @@ Reload = Callable[[], Awaitable[tuple[Config, list[str]]]]
 #: Changes the ignore list: (action "add" or "remove", name) -> the new list; raises ConfigError
 ChangeIgnored = Callable[[str, str], Awaitable[Sequence[str]]]
 
-#: Who comes back within this time gets the "welcome back" greeting
-WELCOME_BACK = timedelta(minutes=30)
+#: Who comes back within this time gets the "welcome back" greeting (as the Perl bot did)
+WELCOME_BACK = timedelta(hours=6)
 #: Greetings wait a little, so the newcomer's chat window is ready
 GREETING_DELAY = timedelta(seconds=5)
 #: How often users may start these games (mods and up always can)
@@ -146,10 +158,11 @@ class Bot:
                 if guest:
                     self._guests.add(user.casefold())
                 self._greet(user, guest)
-            case Logout(user=user):
-                self._guests.discard(user.casefold())
-                self._seen[user.casefold()] = self._clock()
-            case RoomLeave(user=user):
+            case RoomEnter(user=user, guest=guest):
+                self._greet(user, guest or user.casefold() in self._guests)
+            case Back(user=user, guest=guest):
+                self._greet(user, guest or user.casefold() in self._guests, back=True)
+            case Logout(user=user) | RoomLeave(user=user):
                 self._guests.discard(user.casefold())
             case FloodWarning(user=user, number=number) if self._is_me(user):
                 logger.warning("Webkicks hat den Bot wegen Flooding verwarnt (%d. Verwarnung)", number)
@@ -322,6 +335,23 @@ class Bot:
         else:
             self.reply(command, "Ich kenne meine ID leider nicht :-(")
 
+    async def _solution(self, command: Command) -> None:
+        """!solution, whispered by bot admins: the solutions of the running games (undocumented, as in Perl)"""
+        if command.level < Level.ADMIN:
+            return
+        if not command.whispered:
+            self.reply(command, "Das musst du mir flüstern!")
+            return
+        solutions = []
+        for name, game in self.games.items():
+            if isinstance(game, Hangman | Wordmix):
+                solutions.append(f"{name}: {game.word}")
+            elif isinstance(game, Timebomb):
+                solutions.append(f"zeitbombe: {game.wire}")
+            elif isinstance(game, Quiz):
+                solutions.append(f"quiz: {game.current.answer}")
+        self.reply(command, f"Die Lösung ist: {', '.join(solutions)}" if solutions else "Es läuft doch gar kein Spiel!")
+
     async def _ignore(self, command: Command) -> None:
         await self._change_ignore_list(command, add=True)
 
@@ -490,7 +520,9 @@ class Bot:
 
     # -- greetings and KI
 
-    def _greet(self, user: str, guest: bool) -> None:
+    def _greet(self, user: str, guest: bool, back: bool = False) -> None:
+        """As the Perl bot: on logins, on entering from another room, and when back from away (wb,
+        at once). "Welcome back" for those greeted within WELCOME_BACK, else hello."""
         if self._is_me(user) or self.level(user, guest) == Level.IGNORED:
             return
         if guest and self.config.guest_mode == GuestMode.IGNORE:
@@ -499,11 +531,12 @@ class Bot:
         name = user.casefold()
         greeting = self.config.custom_greetings.get(name, self.config.greeting)
         last = self._seen.get(name)
-        template = greeting.wb if last is not None and now - last <= WELCOME_BACK else greeting.hello
+        recently = last is not None and now - last <= WELCOME_BACK
+        template = greeting.wb if back or recently else greeting.hello
         self._seen[name] = now
         if template.strip():
             text = render(template, chat_values={"user": user}, rng=self._rng)
-            self._greetings.append((now + GREETING_DELAY, text))
+            self._greetings.append((now if back else now + GREETING_DELAY, text))
 
     def _patterns(self, event: Message | Whisper, level: Level) -> None:
         """The KI: reactions to messages that contain a text or match a regex."""
@@ -524,6 +557,7 @@ class Bot:
                 self.say(*(f"/f {event.user} {line}" for line in lines))
             else:
                 self.say(*lines)
+            return  # only the first matching entry reacts, as in the Perl bot
 
     # -- helpers
 
@@ -589,6 +623,7 @@ _SYSTEM_COMMANDS: dict[str, Callable[[Bot, Command], Awaitable[None]]] = {
     "zitat": Bot._quote,
     "suche": Bot._search,
     "bid": Bot._bid,
+    "solution": Bot._solution,
     "ignore": Bot._ignore,
     "unignore": Bot._unignore,
     "cheat": Bot._cheat,

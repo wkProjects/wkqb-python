@@ -13,14 +13,15 @@ import contextlib
 import enum
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Coroutine, Mapping
+from typing import Any
 
 import aiohttp
 
 from wkqb import config as settings
 from wkqb.bot import Bot
 from wkqb.config import Config, ConfigError
-from wkqb.events import ChatStarted, KeepAlive, Logout, TakenOver, parse_line
+from wkqb.events import ChatStarted, KeepAlive, Logout, TakenOver, TimeoutWarning, parse_line
 from wkqb.outbox import INTERVAL, Outbox
 from wkqb.redaction import redact, secrets
 from wkqb.stream import LineSplitter
@@ -76,6 +77,8 @@ class Runner:
         self._tick_interval = tick_interval
         self.outbox = Outbox(interval=send_interval)
         self.bot: Bot | None = None
+        self._tasks: set[asyncio.Task[None]] = set()
+        """Background work, referenced so it isn't garbage-collected"""
         self._last_chat = time.monotonic()
         """When a stream last delivered the chat"""
 
@@ -170,6 +173,10 @@ class Runner:
                     if logger.isEnabledFor(logging.DEBUG) and not isinstance(event, KeepAlive):
                         found = secrets(sid=client.sid, stream=client.stream_token)
                         logger.debug("< %s", redact(line, found))
+                    if isinstance(event, TimeoutWarning):
+                        # as the Perl bot did: activity right away, not only at the next keep-alive
+                        logger.info("Webkicks warnt vor dem Timeout, sende Keep-Alive")
+                        self._background(client.keep_alive())
                     if isinstance(event, Logout) and event.user.casefold() == bot.name.casefold():
                         logger.info("Der Bot hat den Chat verlassen%s", " (Timeout)" if event.timed_out else "")
                     try:
@@ -180,6 +187,19 @@ class Runner:
                         logger.debug("Fehler bei %r", event)
         logger.info("Webkicks hat den Stream geschlossen")
         return End.LOST
+
+    def _background(self, work: Coroutine[Any, Any, None]) -> None:
+        """Runs work without waiting for it; errors are logged."""
+
+        async def run() -> None:
+            try:
+                await work
+            except Exception as e:
+                logger.warning("Keep-Alive fehlgeschlagen: %s: %s", type(e).__name__, e)
+
+        task = asyncio.create_task(run())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     async def _keep_alive(self, client: Webkicks) -> None:
         while True:

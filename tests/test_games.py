@@ -135,7 +135,9 @@ class TestTimebomb:
     def test_wrong_wire(self) -> None:
         game = Timebomb("anna", "bert", now=0, rng=rng())
         wrong = next(w for w in game.wires if w != game.wire)
-        assert game.cut("bert", wrong) == ["Das war leider das falsche Kabel!"]
+        assert game.cut("bert", wrong) == [
+            f"Das war leider das falsche Kabel! Richtig wäre <b>{game.wire}</b> gewesen."
+        ]
         assert not game.running
 
     def test_unknown_wire(self) -> None:
@@ -146,7 +148,10 @@ class TestTimebomb:
 
     def test_timeout(self) -> None:
         game = Timebomb("anna", "bert", now=0, rng=rng())
-        assert game.tick(game.seconds) == ["bert hat es nicht rechtzeitig geschafft, die Bombe zu entschärfen :-("]
+        assert game.tick(game.seconds) == [
+            "bert hat es nicht rechtzeitig geschafft, die Bombe zu entschärfen :-( "
+            f"Richtig wäre <b>{game.wire}</b> gewesen."
+        ]
 
 
 QUIZZES = [
@@ -248,7 +253,7 @@ class TestHotPotato:
         assert game.join("Bert") == ["Bert spielt mit! (2 Spieler)"]
         assert game.join("bert") == ["bert, du spielst doch schon mit!"]
         assert game.join("ANNA") == ["ANNA, du spielst doch schon mit!"]
-        assert game.throw("anna", 1) == ["anna, du hast die Kartoffel doch gar nicht!"]
+        assert game.throw("anna", 1) == ["anna, das Spiel hat doch noch gar nicht angefangen!"]
         assert game.tick(POTATO_SIGNUP - 1) == []
 
     def test_too_few_players(self) -> None:
@@ -270,8 +275,7 @@ class TestHotPotato:
         for _ in range(game.cold_after - 1):
             now += 1
             assert game.holder is not None
-            other = next(p for p in game.players if p != game.holder)
-            assert game.throw(other, now) == [f"{other}, du hast die Kartoffel doch gar nicht!"]
+            assert game.throw("dora", now) == ["Du spielst nicht mit, dora!"]
             assert game.throw(game.holder.upper(), now)[0].startswith("Die heiße Kartoffel fliegt zu")
             assert game.deadline == now + POTATO_THROW_TIME
         assert game.holder is not None
@@ -289,6 +293,21 @@ class TestHotPotato:
         lines = game.tick(POTATO_SIGNUP + 2 * POTATO_THROW_TIME)
         [winner] = game.players
         assert lines == [f"{second} war zu langsam und hat sich die Finger verbrannt!", f"{winner} hat gewonnen!"]
+        assert not game.running
+
+    def test_throwing_without_the_potato_costs_the_game(self) -> None:
+        game = self.game()
+        game.tick(POTATO_SIGNUP)
+        holder = game.holder
+        assert holder is not None
+        others = [p for p in game.players if p != holder]
+        deadline = game.deadline
+        assert game.throw(others[0], POTATO_SIGNUP + 1) == [f"{others[0]} hat sich verworfen und scheidet aus!"]
+        assert game.holder == holder and game.deadline == deadline  # the potato stays where it is
+        assert game.throw(others[1], POTATO_SIGNUP + 2) == [
+            f"{others[1]} hat sich verworfen und scheidet aus!",
+            f"{holder} hat gewonnen!",
+        ]
         assert not game.running
 
     def test_cold_after_10_to_20_throws(self) -> None:

@@ -8,7 +8,7 @@ import pytest
 from wkqb.bot import Bot, Level
 from wkqb.config import CalendarEntry, Config, ConfigError, GuestMode, parse
 from wkqb.cron import TIMEZONE
-from wkqb.events import FloodWarning, Login, Logout, Message, RoomEnter, SystemMessage, Unparsed, Whisper
+from wkqb.events import Back, FloodWarning, Login, Logout, Message, RoomEnter, SystemMessage, Unparsed, Whisper
 from wkqb.games import HotPotato, Timebomb
 from wkqb.outbox import Outbox
 
@@ -291,18 +291,32 @@ async def test_greetings_wait_a_little() -> None:
     assert said(bot) == ["Hallo Emil!"]
 
 
-async def test_welcome_back() -> None:
+async def test_welcome_back_within_6_hours() -> None:
     bot, clock, _ = make(configured(**GREETINGS))
     await bot.handle(Login("Emil", False, "12:34"))
-    await bot.handle(Logout("Emil", False, "12:35", False))
-    clock.now += timedelta(minutes=29)
-    await bot.handle(Login("emil", False, "13:04"))
-    await bot.handle(Logout("Emil", False, "13:05", False))
-    clock.now += timedelta(minutes=31)
-    await bot.handle(Login("Emil", False, "13:36"))
+    clock.now += timedelta(hours=5, minutes=59)
+    await bot.handle(Login("emil", False, "18:33"))  # counted from the last greeting, as in the Perl bot
+    clock.now += timedelta(hours=6, seconds=1)
+    await bot.handle(Login("Emil", False, "00:34"))
     clock.now += timedelta(seconds=5)
     bot.tick()
     assert said(bot) == ["Hallo Emil!", "wb emil!", "Hallo Emil!"]
+
+
+async def test_greetings_for_room_changes_and_returns_from_away() -> None:
+    bot, clock, _ = make(configured(**GREETINGS))
+    await bot.handle(RoomEnter("Emil", False, "12:34", "Smalltalk"))
+    clock.now += timedelta(seconds=5)
+    bot.tick()
+    assert said(bot) == ["Hallo Emil!"]
+    await bot.handle(Back("Emil", False, "12:40"))  # wb at once
+    bot.tick()
+    assert said(bot) == ["wb Emil!"]
+    await bot.handle(Back("Dora", False, "12:41"))  # also without an earlier greeting
+    await bot.handle(Back("wkQB", False, "12:41"))
+    await bot.handle(Back("Spam", False, "12:41"))
+    bot.tick()
+    assert said(bot) == ["wb Dora!"]
 
 
 async def test_custom_greetings() -> None:
@@ -328,7 +342,7 @@ async def test_no_greetings_for_itself_and_ignored_users() -> None:
     bot, clock, _ = make(configured(**GREETINGS))
     await bot.handle(Login("wkQB", False, "12:34"))
     await bot.handle(Login("Spam", False, "12:34"))
-    await bot.handle(RoomEnter("Emil", False, "12:34", "Smalltalk"))  # as the old bot: no greeting
+    await bot.handle(RoomEnter("Spam", False, "12:34", "Smalltalk"))
     clock.now += timedelta(seconds=5)
     bot.tick()
     assert said(bot) == []
@@ -565,7 +579,9 @@ async def test_timebomb() -> None:
     assert said(bot)[0].startswith("Bert schiebt &lt;i&gt;x&lt;/i&gt; eine Bombe zu!")
     clock.now += timedelta(seconds=30)
     bot.tick()
-    assert said(bot) == ["&lt;i&gt;x&lt;/i&gt; hat es nicht rechtzeitig geschafft, die Bombe zu entschärfen :-("]
+    [line] = said(bot)
+    assert line.startswith("&lt;i&gt;x&lt;/i&gt; hat es nicht rechtzeitig geschafft, die Bombe zu entschärfen :-( ")
+    assert line.endswith("</b> gewesen.")
 
 
 async def test_cheating_loses() -> None:
@@ -737,3 +753,27 @@ async def test_hangman_pictures_and_wordmix_hints_from_the_settings() -> None:
     clock.now += timedelta(seconds=150)
     bot.tick()
     assert "Tipp: <b>k _ _ _ e</b>" in said(bot)
+
+
+async def test_ki_only_the_first_matching_entry_reacts() -> None:
+    bot, _, _ = make(configured(**KI))
+    await bot.handle(msg("Emil", "hallo wkQB, bist du ein Bot?"))  # matches three entries
+    assert said(bot) == ["Hi Emil!"]
+
+
+async def test_solution() -> None:
+    bot, _, _ = make(configured(**WORDS, **QUIZ))
+    await bot.handle(Whisper("Bert", False, "12:34", "!solution"))
+    assert said(bot) == ["/f Bert Es läuft doch gar kein Spiel!"]
+    for text in ["!hangman", "!zeitbombe", "!quiz 1"]:
+        await bot.handle(msg("Bert", text))
+    said(bot)
+    bomb = bot.games["zeitbombe"]
+    assert isinstance(bomb, Timebomb)
+    await bot.handle(Whisper("Emil", False, "12:34", "!solution"))  # bot admins only
+    await bot.handle(msg("Bert", "!solution"))
+    await bot.handle(Whisper("Bert", False, "12:34", "!solution"))
+    assert said(bot) == [
+        "Das musst du mir flüstern!",
+        f"/f Bert Die Lösung ist: hangman: Katze, zeitbombe: {bomb.wire}, quiz: Muh",
+    ]

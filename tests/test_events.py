@@ -13,6 +13,7 @@ from wkqb.events import (
     Login,
     Message,
     SystemMessage,
+    TimeoutWarning,
     Unparsed,
     Whisper,
     parse_line,
@@ -43,8 +44,14 @@ def test_recorded_lines_cover_all_events() -> None:
         for name, value in vars(events).items()
         if isinstance(value, type) and issubclass(value, Event) and value not in (Event, events.UserEvent)
     }
-    # the nightly maintenance message has not been recorded yet
-    assert concrete - kinds == {"SystemMessage"}
+    # not recorded yet: the nightly maintenance message, the timeout warning (from the Perl bot)
+    assert concrete - kinds == {"SystemMessage", "TimeoutWarning"}
+
+
+def test_timeout_warning() -> None:
+    # as the Perl bot matched it
+    line = ROW.format('<b><FONT COLOR="red">Ohne weitere Eingabe erfolgt in 2 Minuten dein Timeout.</font></b>')
+    assert parse_line(line) == TimeoutWarning()
 
 
 def test_system_message() -> None:

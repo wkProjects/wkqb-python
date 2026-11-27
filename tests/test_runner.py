@@ -222,3 +222,15 @@ async def test_ignore_goes_to_the_web_interface(
         await asyncio.sleep(0.1)
     assert fake.config["users"]["ignored"] == ["Dora"]
     assert "Pong!" not in fake.messages  # ignored, also after the reload
+
+
+async def test_timeout_warning_sends_a_keep_alive(fake: FakeWebkicks, runner_factory: Callable[..., Runner]) -> None:
+    warning = (
+        '<table border=0><tr><td valign=bottom><b><FONT COLOR="red">'
+        "Ohne weitere Eingabe erfolgt in 2 Minuten dein Timeout.</font></b></td></tr></table>\n"
+    )
+    async with running(runner_factory()):
+        await chat_started(fake)
+        assert fake.keepalives == []
+        fake.push(warning)
+        await until(lambda: len(fake.keepalives) == 1)

@@ -25,6 +25,11 @@ class KeepAlive(Event):
 
 
 @dataclass(frozen=True, slots=True)
+class TimeoutWarning(Event):
+    """Webkicks logs the account out in 2 minutes unless it shows activity (a keep-alive does)."""
+
+
+@dataclass(frozen=True, slots=True)
 class TakenOver(Event):
     """The account logged in elsewhere; Webkicks closes this stream."""
 
@@ -248,6 +253,8 @@ def _parse(line: str) -> Event:
     body = row.group("body")
     if (system := _SYSTEM.search(body)) is not None:
         return SystemMessage(plain(system.group("text")))
+    if "Ohne weitere Eingabe erfolgt in 2 Minuten dein Timeout" in body:
+        return TimeoutWarning()
     if (room := _ROOM_ENTERED.match(body)) is not None:
         return RoomEntered(html.unescape(room.group("room")))
 
