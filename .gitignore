@@ -1,3 +1,11 @@
 /venv/
 /.idea/
 .env
+/.venv/
+__pycache__/
+# tracer output and credential files: chat data and passwords
+/traces/
+*.env
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/

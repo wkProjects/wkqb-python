@@ -1,0 +1,50 @@
+[project]
+name = "wkqb"
+version = "6.0.0.dev0"
+description = "wkQB, the Webkicks Quote Bot"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "aiohttp>=3.14,<4",
+]
+
+[project.scripts]
+wkqb-tracer = "wkqb.tracer:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4",
+    "pytest>=9.2",
+    "pytest-asyncio>=1.5",
+    "ruff>=0.17",
+]
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 120
+src = ["src", "tests"]
+# the old bot in the repository root is replaced step by step and not linted
+include = ["src/**/*.py", "tests/**/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+# the tests poll the fake server's state
+"tests/**" = ["ASYNC110"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+mypy_path = "tests"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+# keeps the repository root (the old bot's wkqb.py) off sys.path; the test helpers are in tests/
+addopts = ["--import-mode=importlib"]
+pythonpath = ["tests"]
