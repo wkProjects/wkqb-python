@@ -168,3 +168,14 @@ async def test_send_without_login(
     with pytest.raises(NotLoggedIn):
         await client.send("Hallo")
     assert fake.sent == [("TestBot", "Hallo"), ("TestBot", "/exit")]
+
+
+async def test_retries_once_when_the_server_closed_the_connection(
+    fake: FakeWebkicks, session: aiohttp.ClientSession, chat: ChatUrl, credentials: Credentials
+) -> None:
+    events = Events()
+    client = Webkicks(session, chat, credentials, events)
+    fake.disconnect.add("sid")
+    assert await client.fetch_sid() == "88AbCdEfGhIjK"
+    assert "ServerDisconnectedError" in events[0][1]["error"]
+    assert events[1][1]["status"] == 200

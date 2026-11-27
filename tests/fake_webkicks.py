@@ -32,6 +32,8 @@ class FakeWebkicks:
     """(user, message) of the chat messages"""
     fail: dict[str, int] = field(default_factory=dict)
     """Status to answer with, by step ("sid", "login", "frame", "stream", "tok", "send"); used once"""
+    disconnect: set[str] = field(default_factory=set)
+    """Steps whose next request is answered by closing the connection (once)"""
     relative_stream_url: bool = False
     streams_opened: int = 0
     _queues: list[asyncio.Queue[bytes | None]] = field(default_factory=list)
@@ -71,8 +73,18 @@ class FakeWebkicks:
             return None
         return account
 
+    def _drop(self, request: web.Request, step: str) -> bool:
+        if step not in self.disconnect:
+            return False
+        self.disconnect.discard(step)
+        assert request.transport is not None
+        request.transport.close()
+        return True
+
     async def _api(self, request: web.Request) -> web.Response:
         form = await request.post()
+        if self._drop(request, "sid"):
+            return web.Response()
         if failure := self._failure("sid"):
             return failure
         user, password = str(form.get("user", "")), str(form.get("pass", ""))

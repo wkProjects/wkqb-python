@@ -199,7 +199,23 @@ class Webkicks:
         form: Mapping[str, str] | None = None,
         on_body: Callable[[str], None] | None = None,
     ) -> str:
-        """Sends a request and returns the body as text. Raises WebkicksError on HTTP errors."""
+        """Sends a request and returns the body as text. Raises WebkicksError on HTTP errors.
+
+        A request on a pooled connection that the server had already closed fails with
+        ServerDisconnectedError before the server saw it, so it is sent once more.
+        """
+        try:
+            return await self._request_once(method, url, form, on_body)
+        except aiohttp.ServerDisconnectedError:
+            return await self._request_once(method, url, form, on_body)
+
+    async def _request_once(
+        self,
+        method: str,
+        url: str,
+        form: Mapping[str, str] | None,
+        on_body: Callable[[str], None] | None,
+    ) -> str:
         traced: dict[str, Any] = {"method": method, "url": url}
         if form is not None:
             traced["form"] = {k: "<redacted>" if k in _SECRET_FIELDS else v for k, v in form.items()}
