@@ -76,8 +76,8 @@ async def test_records_the_stream_and_logs_in_again_when_it_ends(
 
     # neither the password (in the login answer) nor the sid end up in the trace
     text = json.dumps(recorded)
-    assert "geheim123" not in text and "88AbCdEfGhIjK" not in text
-    assert "<password>" in text and "<sid>" in text
+    assert "geheim123" not in text and "88AbCdEfGhIjK" not in text and "StReAmToKeN" not in text
+    assert "<password>" in text and "<sid>" in text and "<stream>" in text
 
 
 async def test_survives_errors_after_the_first_stream(
@@ -148,7 +148,13 @@ async def test_logout(
     assert events(tmp_path)[-1]["during"] == "logout"
 
 
-async def test_send(fake: FakeWebkicks, chat: ChatUrl, credentials: Credentials, tmp_path: Path) -> None:
+async def test_send(
+    fake: FakeWebkicks, chat: ChatUrl, credentials: Credentials, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert await tracer.send(chat, credentials, recorder(tmp_path, credentials), "x") == 1
+    assert "not logged in" in capsys.readouterr().err
+
+    fake.online.add("testbot")  # "run" is logged in
     assert await tracer.send(chat, credentials, recorder(tmp_path, credentials), "Hallo Welt") == 0
     assert fake.sent == [("TestBot", "Hallo Welt")]
     assert {e["conn"] for e in events(tmp_path)} == {"send"}
@@ -186,3 +192,23 @@ def test_main_needs_credentials(capsys: pytest.CaptureFixture[str], monkeypatch:
         tracer.main(["run"])
     assert exit_info.value.code == 2
     assert "missing: WK_CHATURL, WK_USERNAME, WK_PASSWORD" in capsys.readouterr().err
+
+
+async def test_stops_when_the_account_logs_in_elsewhere(
+    fake: FakeWebkicks, session: aiohttp.ClientSession, chat: ChatUrl, credentials: Credentials, tmp_path: Path
+) -> None:
+    t = make(session, chat, credentials, tmp_path)
+    task = asyncio.create_task(t.run())
+    await fake.wait_for_stream(1)
+    fake.push("<!-- update //-->\n")
+    # split across two chunks
+    fake.push("<font color=red>Connection Closed (multiple ")
+    await until(lambda: t.streams == 1)
+    fake.push("Login detected)</font><br>\n")
+    fake.close_stream()
+    async with asyncio.timeout(5):
+        await task  # ends without an error
+    assert fake.streams_opened == 1
+    assert events(tmp_path)[-1]["reason"] == "logged in elsewhere"
+    await t.logout()
+    assert fake.sent == []  # the other session must not be logged out

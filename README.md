@@ -24,7 +24,9 @@ The tests use a fake Webkicks server (`tests/fake_webkicks.py`), never the real 
 `wkqb-tracer` records everything a chat account sees, to learn how Webkicks behaves (message format,
 keep-alives, the nightly maintenance). It logs in like the bot, writes every HTTP exchange and every chunk of the
 chat stream to `traces/<account>/<date>.jsonl`, and logs in again whenever the stream ends or anything fails. It only
-gives up if the very first login fails. Passwords (from 6 characters) and session ids are removed from the traces.
+stops on its own if the very first login fails, or if the account logs in elsewhere (Webkicks allows one session per
+account, so logging in again would throw the other session out). Passwords (from 6 characters), session ids and stream
+tokens are removed from the traces.
 
 Only use it with test accounts, in a chat whose users know that it is recorded.
 

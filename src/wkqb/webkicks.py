@@ -26,10 +26,18 @@ Trace = Callable[[str, dict[str, Any]], None]
 #: Form fields that hold the password or the session id
 _SECRET_FIELDS = frozenset({"pass"})
 _STREAM_URL = re.compile(r"""URL=([^"'\s>]+)""", re.IGNORECASE)
+#: The stream URL has a token of its own, e.g. /nexus/chatstream/mybot/<token>/stream
+_STREAM_TOKEN = re.compile(r"/chatstream/[^/]+/([^/]+)/stream")
+#: chat.cgi answers a message with HTTP 204 and no body; without a login it shows an error page
+_SEND_NOT_LOGGED_IN = "Bitte neu einloggen"
 
 
 class WebkicksError(Exception):
     """Webkicks answered, but not as expected."""
+
+
+class NotLoggedIn(WebkicksError):
+    """The account isn't logged in (any more), e.g. after the nightly maintenance."""
 
 
 @dataclass(frozen=True)
@@ -75,6 +83,8 @@ class Webkicks:
         self.credentials = credentials
         self._trace = trace
         self.sid: str | None = None
+        self.stream_token: str | None = None
+        """Like the sid, it gives access to the chat while its stream is open"""
 
     async def fetch_sid(self) -> str:
         """Asks the chat API for the session id of the account."""
@@ -121,13 +131,22 @@ class Webkicks:
 
     async def stream_url(self) -> str:
         """The URL of the chat stream, from the frame that starts it."""
-        frame = await self._request(
-            "GET", f"{self.chat.url}/chatstream/{self.credentials.username}/{self._sid()}/start"
+        url: str | None = None
+
+        def take_url(frame: str) -> None:
+            nonlocal url
+            if (match := _STREAM_URL.search(frame)) is not None:
+                url = urljoin(f"{self.chat.url}/", str(match.group(1)))
+                if (token := _STREAM_TOKEN.search(url)) is not None:
+                    self.stream_token = token.group(1)
+
+        # the token is known before the frame is traced, so it is removed from it
+        await self._request(
+            "GET", f"{self.chat.url}/chatstream/{self.credentials.username}/{self._sid()}/start", on_body=take_url
         )
-        match = _STREAM_URL.search(frame)
-        if match is None:
+        if url is None:
             raise WebkicksError("the stream frame has no stream URL")
-        return urljoin(f"{self.chat.url}/", str(match.group(1)))
+        return url
 
     async def stream(self, url: str, read_timeout: float) -> AsyncGenerator[bytes]:
         """The chat stream in the chunks it arrives in. Ends when Webkicks closes it.
@@ -151,11 +170,14 @@ class Webkicks:
         await self._request("GET", f"{self.chat.url}/tok/{self.credentials.username.lower()}/{self._sid()}/{millis}")
 
     async def send(self, message: str) -> None:
-        await self._request(
+        """Sends a chat message or command. Raises NotLoggedIn if the account isn't in the chat."""
+        body = await self._request(
             "POST",
             f"{self.chat.server}/cgi-bin/chat.cgi",
             {"user": self.credentials.username, "pass": self._sid(), "cid": self.chat.cid, "message": message},
         )
+        if _SEND_NOT_LOGGED_IN in body:
+            raise NotLoggedIn("chat.cgi: not logged in")
 
     async def logout(self) -> None:
         await self.send("/exit")
@@ -167,7 +189,8 @@ class Webkicks:
 
     def _emit(self, event: str, fields: dict[str, Any]) -> None:
         if self._trace is not None:
-            self._trace(event, redact(fields, secrets(sid=self.sid, password=self.credentials.password)))
+            found = secrets(sid=self.sid, stream=self.stream_token, password=self.credentials.password)
+            self._trace(event, redact(fields, found))
 
     async def _request(
         self,

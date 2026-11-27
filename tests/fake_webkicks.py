@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from aiohttp import web
 
 CID = "testchat"
+#: Followed by the number of the stream
+STREAM_TOKEN = "StReAmToKeN"
 
 
 @dataclass
@@ -21,6 +23,8 @@ class FakeWebkicks:
     )
     logins: list[str] = field(default_factory=list)
     """User names of the logins, as sent"""
+    online: set[str] = field(default_factory=set)
+    """Lower-case names of the logged in accounts"""
     sid_requests: list[str] = field(default_factory=list)
     keepalives: list[str] = field(default_factory=list)
     """Paths of the keep-alive requests"""
@@ -38,7 +42,7 @@ class FakeWebkicks:
         app.router.add_post(f"/{CID}/api", self._api)
         app.router.add_post(f"/{CID}/", self._login)
         app.router.add_get(f"/{CID}/chatstream/{{user}}/{{sid}}/start", self._frame)
-        app.router.add_get("/stream/{n}", self._stream)
+        app.router.add_get(f"/{CID}/chatstream/{{user}}/{{token}}/stream", self._stream)
         app.router.add_get(f"/{CID}/tok/{{user}}/{{sid}}/{{millis}}", self._tok)
         app.router.add_post("/cgi-bin/chat.cgi", self._send)
         return app
@@ -87,6 +91,7 @@ class FakeWebkicks:
         account = self._account(user, str(form.get("pass", "")), by_sid=False)
         if account is None:
             return web.Response(text="Falsches Passwort", content_type="text/html")
+        self.online.add(user.lower())
         # the real chat page has the credentials in it, too
         return web.Response(
             text=f'<frameset><frame src="/{CID}/chatstream/{user}/{account.sid}/start">'
@@ -101,13 +106,14 @@ class FakeWebkicks:
             return web.Response(status=403, text="Zugriff verweigert")
         n = len(self._queues)
         self._queues.append(asyncio.Queue())
-        url = f"/stream/{n}" if self.relative_stream_url else f"http://{request.host}/stream/{n}"
+        path = f"/{CID}/chatstream/{request.match_info['user'].lower()}/{STREAM_TOKEN}{n}/stream"
+        url = path if self.relative_stream_url else f"http://{request.host}{path}"
         return web.Response(text=f'<meta http-equiv="refresh" content="0; URL={url}">', content_type="text/html")
 
     async def _stream(self, request: web.Request) -> web.StreamResponse:
         if failure := self._failure("stream"):
             return failure
-        queue = self._queues[int(request.match_info["n"])]
+        queue = self._queues[int(request.match_info["token"].removeprefix(STREAM_TOKEN))]
         response = web.StreamResponse(headers={"Content-Type": "text/html; charset=utf-8"})
         await response.prepare(request)
         self.streams_opened += 1
@@ -130,5 +136,15 @@ class FakeWebkicks:
         user = str(form.get("user", ""))
         if self._account(user, str(form.get("pass", "")), by_sid=True) is None or form.get("cid") != CID:
             return web.Response(status=403, text="Zugriff verweigert")
-        self.sent.append((user, str(form.get("message", ""))))
-        return web.Response(text="")
+        if user.lower() not in self.online:
+            # as recorded from Webkicks
+            return web.Response(
+                text="<html><title>Fehler</title><body>Fehler: Timeout. Bitte neu einloggen.</body></html>",
+                content_type="text/html",
+            )
+        message = str(form.get("message", ""))
+        self.sent.append((user, message))
+        if message == "/exit":
+            self.online.discard(user.lower())
+            return web.Response(text="<i>bye, <b>" + user + "</b></i>", content_type="text/html")
+        return web.Response(status=204)

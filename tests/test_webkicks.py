@@ -5,7 +5,7 @@ import aiohttp
 import pytest
 
 from fake_webkicks import FakeWebkicks
-from wkqb.webkicks import ChatUrl, Credentials, Webkicks, WebkicksError
+from wkqb.webkicks import ChatUrl, Credentials, NotLoggedIn, Webkicks, WebkicksError
 
 
 class Events(list[tuple[str, dict[str, Any]]]):
@@ -44,7 +44,8 @@ async def test_session_flow(
     await client.login()
     assert fake.logins == ["TestBot"]
     url = await client.stream_url()
-    assert url.endswith("/stream/0")
+    assert url.endswith("/testchat/chatstream/testbot/StReAmToKeN0/stream")
+    assert client.stream_token == "StReAmToKeN0"
 
     # queued before the stream opens, sent once it does
     fake.push("<!-- update //-->")
@@ -68,8 +69,10 @@ async def test_session_flow(
     # neither the password (in the login answer) nor the sid (answer of get_sid, URLs) are traced
     forms = [fields["form"] for name, fields in events if "form" in fields]
     assert all(form.get("pass") in (None, "<redacted>") for form in forms)
-    assert "geheim123" not in str(events) and "88AbCdEfGhIjK" not in str(events)
+    for secret in ("geheim123", "88AbCdEfGhIjK", "StReAmToKeN0"):
+        assert secret not in str(events)
     assert '{"sid": "<sid>"}' in str(events)
+    assert "/chatstream/testbot/<stream>/stream" in str(events)
 
 
 async def test_relative_stream_url(
@@ -78,7 +81,7 @@ async def test_relative_stream_url(
     fake.relative_stream_url = True
     client = Webkicks(session, chat, credentials)
     await client.fetch_sid()
-    assert await client.stream_url() == f"{chat.server}/stream/0"
+    assert await client.stream_url() == f"{chat.server}/testchat/chatstream/testbot/StReAmToKeN0/stream"
 
 
 async def test_wrong_password(session: aiohttp.ClientSession, chat: ChatUrl) -> None:
@@ -150,3 +153,18 @@ async def test_stream_chunks_are_redacted(
     async with contextlib.aclosing(client.stream(url, read_timeout=5)) as stream:
         assert b"".join([chunk async for chunk in stream]) == b"sid=88AbCdEfGhIjK"  # the bot gets the real data
     assert b"".join(f["data"] for name, f in events if name == "chunk") == b"sid=<sid>"
+
+
+async def test_send_without_login(
+    fake: FakeWebkicks, session: aiohttp.ClientSession, chat: ChatUrl, credentials: Credentials
+) -> None:
+    client = Webkicks(session, chat, credentials)
+    await client.fetch_sid()
+    with pytest.raises(NotLoggedIn):
+        await client.send("Hallo")
+    await client.login()
+    await client.send("Hallo")
+    await client.logout()
+    with pytest.raises(NotLoggedIn):
+        await client.send("Hallo")
+    assert fake.sent == [("TestBot", "Hallo"), ("TestBot", "/exit")]

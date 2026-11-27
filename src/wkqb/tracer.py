@@ -1,14 +1,16 @@
 """Records everything a chat account sees, to learn the Webkicks protocol (see wkqb.recorder).
 
     wkqb-tracer run  [--env-file FILE] [--out DIR]    stay in the chat and record the stream
-    wkqb-tracer send [--env-file FILE] [--out DIR] MESSAGE...    send a chat message as the account
+    wkqb-tracer send [--env-file FILE] [--out DIR] MESSAGE...    send a chat message while "run" is logged in
 
 The credentials come from WK_CHATURL, WK_USERNAME and WK_PASSWORD (environment or --env-file).
 
 "run" logs in like the bot and records every HTTP exchange and every stream chunk with its
-arrival time. It never ends on its own: when the stream ends or anything fails, it records why
-and logs in again, waiting longer after each failed attempt. Only a failure before the first
-stream ends it (wrong credentials, wrong chat). SIGINT/SIGTERM log the account out.
+arrival time. When the stream ends or anything fails, it records why and logs in again, waiting
+longer after each failed attempt. It only ends on its own when the first login fails (wrong
+credentials, wrong chat) or when the account logs in elsewhere: logging in again would end that
+other session, and two tracers would throw each other out forever. SIGINT/SIGTERM log the account
+out.
 
 Only use it with test accounts in a chat whose users know that it is recorded. Passwords shorter
 than 6 characters can't be removed from the traces (see wkqb.recorder).
@@ -40,6 +42,12 @@ RETRY_MIN = 5.0
 RETRY_MAX = 300.0
 #: A stream that lasted this long resets the waiting time
 STABLE_AFTER = 300.0
+#: The last message of the stream when the account logs in elsewhere
+TAKEN_OVER = b"Connection Closed (multiple Login detected)"
+
+
+class TakenOver(Exception):
+    """The account logged in elsewhere, which closed our stream."""
 
 
 class Tracer:
@@ -69,7 +77,10 @@ class Tracer:
         """Number of streams that delivered data so far"""
 
     async def run(self) -> None:
-        """Records until cancelled. Raises only if a connection fails before any stream delivered data."""
+        """Records until cancelled or the account logged in elsewhere.
+
+        Raises if a connection fails before any stream delivered data.
+        """
         delay = self._retry_min
         while True:
             self._conn += 1
@@ -79,6 +90,12 @@ class Tracer:
                 self._event("stream_end", {"reason": reason, "seconds": round(time.monotonic() - started, 3)})
             except asyncio.CancelledError:
                 raise
+            except TakenOver:
+                self._event(
+                    "stream_end", {"reason": "logged in elsewhere", "seconds": round(time.monotonic() - started, 3)}
+                )
+                self._client = None  # nothing to log out
+                return
             except Exception as e:
                 self._event(
                     "error",
@@ -115,15 +132,20 @@ class Tracer:
         self._recorder.redact(await client.fetch_sid(), "<sid>")
         await client.login()
         url = await client.stream_url()
+        self._recorder.redact(client.stream_token, "<stream>")
 
         keepalive = asyncio.create_task(self._keep_alive(client, conn))
         try:
             async with contextlib.aclosing(client.stream(url, self._read_timeout)) as stream:
                 received = False
-                async for _ in stream:
+                tail = b""  # the end of the stream so far; a message can span chunks
+                async for chunk in stream:
                     if not received:
                         self.streams += 1
                         received = True
+                    tail = (tail + chunk)[-2 * len(TAKEN_OVER) :]
+            if TAKEN_OVER in tail:
+                raise TakenOver()
             return "closed by Webkicks"
         except TimeoutError:
             return f"nothing received for {self._read_timeout:g} seconds"
@@ -158,9 +180,12 @@ async def trace(chat: ChatUrl, credentials: Credentials, recorder: Recorder) -> 
         await asyncio.wait({runner, stopper}, return_when=asyncio.FIRST_COMPLETED)
         stopper.cancel()
         if runner.done():
-            # only the first connection can end the tracer
-            print(f"wkqb-tracer: {runner.exception()}", file=sys.stderr)
-            return 1
+            if (error := runner.exception()) is not None:
+                print(f"wkqb-tracer: {error}", file=sys.stderr)
+                return 1
+            print("wkqb-tracer: the account logged in elsewhere, stopping", file=sys.stderr)
+            recorder.event(0, "stop", {"reason": "logged in elsewhere"})
+            return 0
         runner.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await runner
