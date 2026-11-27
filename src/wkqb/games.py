@@ -19,8 +19,16 @@ HANGMAN_TRIES = 10
 #: A wrong solution costs this many tries
 HANGMAN_WRONG_SOLUTION = 3
 WORDMIX_TIME = 120.0
+#: Seconds after the start for the hints (first letter, then also the last one)
+WORDMIX_HINTS = (60.0, 90.0)
 TIMEBOMB_MIN, TIMEBOMB_MAX = 15, 30
 QUIZ_QUESTION_TIME = 20.0
+POTATO_SIGNUP = 60.0
+POTATO_MIN_PLAYERS = 3
+#: Seconds to throw the potato back: 10 as in the rules, plus the bot's sending delay
+POTATO_THROW_TIME = 12.0
+#: The potato is cold after this many throws
+POTATO_THROWS = (10, 20)
 
 WIRES = (
     "Rot",
@@ -62,8 +70,21 @@ class Game:
 
 
 class Hangman(Game):
-    def __init__(self, words: Sequence[str], show_solution: bool, now: float, rng: random.Random) -> None:
+    def __init__(
+        self,
+        words: Sequence[str],
+        show_solution: bool,
+        now: float,
+        rng: random.Random,
+        *,
+        sign: str = "!",
+        picture: str | None = None,
+    ) -> None:
+        """picture: shown with the used tries, "{n}" is their number (0-10), e.g. ':hangman{n}' (a chat smiley)
+        or an <img> tag (only works if the bot is a chat admin); None for text only."""
         self.word = rng.choice(words).strip()
+        self.sign = sign
+        self.picture = picture
         self.show_solution = show_solution
         self.remaining = HANGMAN_TRIES
         self.tried: set[str] = set()
@@ -80,8 +101,9 @@ class Hangman(Game):
 
     def start(self) -> list[str]:
         return [
-            f"Hangman gestartet! Gesucht: {self.pattern()} ({len(self.word)} Zeichen)",
-            "Ratet einen Buchstaben mit <b>!hangman BUCHSTABE</b>. Lösen könnt ihr mit <b>!hangman LÖSUNG</b>. "
+            f"Hangman gestartet! Gesucht: {self.pattern()} ({len(self.word)} Zeichen){self._picture()}",
+            f"Ratet einen Buchstaben mit <b>{_e(self.sign)}hangman BUCHSTABE</b>. "
+            f"Lösen könnt ihr mit <b>{_e(self.sign)}hangman LÖSUNG</b>. "
             f"Ihr habt <b>{HANGMAN_TRIES}</b> Versuche. Viel Erfolg!",
         ]
 
@@ -115,10 +137,10 @@ class Hangman(Game):
 
         if self.remaining <= 0:
             self.running = False
-            answer.append("Leider sind alle Versuche aufgebraucht :-(")
+            answer.append(f"Leider sind alle Versuche aufgebraucht :-({self._picture()}")
             answer += self._solution()
         else:
-            answer.append(f"Verbleibende Versuche: {self.remaining}")
+            answer.append(f"Verbleibende Versuche: {self.remaining}{self._picture()}")
         return answer
 
     def timeout(self, now: float) -> list[str]:
@@ -128,6 +150,13 @@ class Hangman(Game):
     def _solution(self) -> list[str]:
         return [f"Die richtige Lösung war: {self.word}"] if self.show_solution else []
 
+    def _picture(self) -> str:
+        """The gallows for the used tries, after a space."""
+        if self.picture is None:
+            return ""
+        used = min(HANGMAN_TRIES, HANGMAN_TRIES - self.remaining)
+        return " " + self.picture.replace("{n}", str(used))
+
 
 def _display(ch: str) -> str:
     """A letter in upper case, unless that changes it (ß would become SS)."""
@@ -136,9 +165,20 @@ def _display(ch: str) -> str:
 
 
 class Wordmix(Game):
-    def __init__(self, words: Sequence[str], show_solution: bool, now: float, rng: random.Random) -> None:
+    def __init__(
+        self,
+        words: Sequence[str],
+        show_solution: bool,
+        now: float,
+        rng: random.Random,
+        *,
+        sign: str = "!",
+        hints: bool = False,
+    ) -> None:
         self.word = rng.choice(words).strip()
         self.show_solution = show_solution
+        self.sign = sign
+        self.hint_times = [now + after for after in WORDMIX_HINTS] if hints else []
         letters = self.word.lower()
         shuffled = letters
         # a short word could come out unchanged
@@ -152,7 +192,7 @@ class Wordmix(Game):
     def start(self) -> list[str]:
         return [
             f"Wordmix gestartet! Gesucht: <b>{self.shuffled}</b>",
-            "Ratet die Lösung mit <b>!wordmix LÖSUNG</b>. Ihr habt <b>2 Minuten</b> Zeit. Viel Erfolg!",
+            f"Ratet die Lösung mit <b>{_e(self.sign)}wordmix LÖSUNG</b>. Ihr habt <b>2 Minuten</b> Zeit. Viel Erfolg!",
         ]
 
     def guess(self, user: str, text: str, now: float) -> list[str]:
@@ -164,6 +204,17 @@ class Wordmix(Game):
             return [f"Volltreffer {_e(user)}, {self.word} ist richtig!"]
         return [f"{_e(user)}, {_e(guess)} war leider nicht die richtige Lösung."]
 
+    def tick(self, now: float) -> list[str]:
+        answer = super().tick(now)
+        if self.running and self.hint_times and now >= self.hint_times[0]:
+            self.hint_times.pop(0)
+            first, last = self.word[0].upper(), self.word[-1].lower()
+            if self.hint_times:
+                answer.append(f"Tipp: Das Wort beginnt mit <b>{first}</b>.")
+            else:
+                answer.append(f"Tipp: Das Wort beginnt mit <b>{first}</b> und endet mit <b>{last}</b>.")
+        return answer
+
     def timeout(self, now: float) -> list[str]:
         self.running = False
         answer = ["Die Zeit für Wordmix ist abgelaufen!"]
@@ -173,7 +224,8 @@ class Wordmix(Game):
 
 
 class Timebomb(Game):
-    def __init__(self, offender: str, victim: str, now: float, rng: random.Random) -> None:
+    def __init__(self, offender: str, victim: str, now: float, rng: random.Random, *, sign: str = "!") -> None:
+        self.sign = sign
         self.offender = offender
         self.victim = victim or offender
         self.wires = rng.sample(WIRES, k=3)
@@ -185,7 +237,7 @@ class Timebomb(Game):
         return [
             f"{_e(self.offender)} schiebt {_e(self.victim)} eine Bombe zu! "
             f"Der Timer sagt: <b>{self.seconds}</b> Sekunden!",
-            "Schneide ein Kabel mit <b>!schneide FARBE</b> durch. "
+            f"Schneide ein Kabel mit <b>{_e(self.sign)}schneide FARBE</b> durch. "
             f"Die Bombe hat folgende Kabel: <b>{', '.join(self.wires)}</b>",
         ]
 
@@ -218,13 +270,16 @@ class QuizSet:
     questions: Sequence[Question]
 
 
-def quiz_menu(quizzes: Sequence[QuizSet]) -> list[str]:
+def quiz_menu(quizzes: Sequence[QuizSet], sign: str = "!") -> list[str]:
     """The answer to !quiz without a running quiz and without an id."""
     if not quizzes:
         return ["Ich kenne leider kein Quiz :-("]
     # one line for all: every line costs 2.5 s (flood protection)
     entries = ", ".join(f"{i}: {quiz.name} ({len(quiz.questions)} Fragen)" for i, quiz in enumerate(quizzes, 1))
-    return [f"Ich habe folgende Quizze anzubieten: {entries}", "Sende !quiz ID, um das gewünschte Quiz zu starten!"]
+    return [
+        f"Ich habe folgende Quizze anzubieten: {entries}",
+        f"Sende {_e(sign)}quiz ID, um das gewünschte Quiz zu starten!",
+    ]
 
 
 class Quiz(Game):
@@ -264,3 +319,63 @@ class Quiz(Game):
             return ["Das waren alle Fragen, das Quiz ist daher beendet!"]
         self.deadline = now + QUIZ_QUESTION_TIME
         return [self.current.question]
+
+
+class HotPotato(Game):
+    """Heiße Kartoffel: players sign up, then the bot throws the potato to a random player, who must
+    throw it back in time or is out. The last player left wins; after POTATO_THROWS throws the potato
+    is cold and all remaining players win.
+    """
+
+    def __init__(self, starter: str, now: float, rng: random.Random, *, sign: str = "!") -> None:
+        self.sign = sign
+        self.rng = rng
+        self.players = [starter]
+        self.holder: str | None = None
+        """None while players sign up"""
+        self.throws = 0
+        self.cold_after = rng.randint(*POTATO_THROWS)
+        self.deadline = now + POTATO_SIGNUP
+
+    def start(self) -> list[str]:
+        return [
+            f"{_e(self.players[0])} startet Heiße Kartoffel! Wer mitspielen will, sendet innerhalb von "
+            f"<b>{POTATO_SIGNUP:.0f} Sekunden</b> <b>{_e(self.sign)}kartoffel</b>. "
+            f"Wer die Kartoffel bekommt, muss sie schnell mit <b>{_e(self.sign)}wurf</b> zurückwerfen!"
+        ]
+
+    def join(self, user: str) -> list[str]:
+        if self.holder is not None:
+            return ["Das Spiel läuft schon, du musst bis zum nächsten warten."]
+        if any(_same(user, player) for player in self.players):
+            return [f"{_e(user)}, du spielst doch schon mit!"]
+        self.players.append(user)
+        return [f"{_e(user)} spielt mit! ({len(self.players)} Spieler)"]
+
+    def throw(self, user: str, now: float) -> list[str]:
+        if self.holder is None or not _same(user, self.holder):
+            return [f"{_e(user)}, du hast die Kartoffel doch gar nicht!"]
+        self.throws += 1
+        if self.throws >= self.cold_after:
+            self.running = False
+            return [f"Die Kartoffel ist kalt! Gewonnen haben: {_e(', '.join(self.players))}"]
+        return self._throw_to_someone(now)
+
+    def timeout(self, now: float) -> list[str]:
+        if self.holder is None:
+            if len(self.players) < POTATO_MIN_PLAYERS:
+                self.running = False
+                return [f"Für Heiße Kartoffel braucht es mindestens {POTATO_MIN_PLAYERS} Spieler, das Spiel fällt aus."]
+            return [f"Es spielen mit: {_e(', '.join(self.players))}", *self._throw_to_someone(now)]
+        loser = self.holder
+        self.players = [player for player in self.players if not _same(player, loser)]
+        answer = [f"{_e(loser)} war zu langsam und hat sich die Finger verbrannt!"]
+        if len(self.players) == 1:
+            self.running = False
+            return [*answer, f"{_e(self.players[0])} hat gewonnen!"]
+        return [*answer, *self._throw_to_someone(now)]
+
+    def _throw_to_someone(self, now: float) -> list[str]:
+        self.holder = self.rng.choice(self.players)
+        self.deadline = now + POTATO_THROW_TIME
+        return [f"Die heiße Kartoffel fliegt zu <b>{_e(self.holder)}</b>! Schnell, <b>{_e(self.sign)}wurf</b>!"]

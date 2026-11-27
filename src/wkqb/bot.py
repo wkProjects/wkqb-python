@@ -23,13 +23,12 @@ from enum import IntEnum
 from wkqb import VERSION, cron
 from wkqb.config import Config, ConfigError, GuestMode, Pattern, WhisperMode
 from wkqb.events import Event, FloodWarning, Login, Logout, Message, RoomLeave, SystemMessage, Unparsed, Whisper
-from wkqb.games import Game, Hangman, Quiz, Timebomb, Wordmix, quiz_menu
+from wkqb.games import Game, Hangman, HotPotato, Quiz, Timebomb, Wordmix, quiz_menu
 from wkqb.outbox import Outbox
 from wkqb.tokens import render
 
 logger = logging.getLogger(__name__)
 
-_COMMAND = re.compile(r"^!(?P<name>\w+)(?:\s+(?P<param>.*))?$", re.DOTALL)
 
 Reload = Callable[[], Awaitable[tuple[Config, list[str]]]]
 
@@ -183,7 +182,8 @@ class Bot:
         level = self.level(event.user, guest)
         if level == Level.IGNORED:
             return
-        match = _COMMAND.match(event.text)
+        sign = re.escape(self.config.command_sign)
+        match = re.match(rf"^{sign}(?P<name>\w+)(?:\s+(?P<param>.*))?$", event.text, re.DOTALL)
         if match is None:
             self._patterns(event, level)
             return
@@ -294,6 +294,7 @@ class Bot:
     async def _word_game(self, command: Command, name: str) -> None:
         now = self._clock().timestamp()
         game = self.games.get(name)
+        sign = self.config.command_sign
         if isinstance(game, Hangman | Wordmix):
             self.say(*game.guess(command.user, command.param, now))
         else:
@@ -301,8 +302,15 @@ class Bot:
             if not settings.words:
                 self.say("Ich habe leider keine Wörter :-(")
                 return
-            kind = Hangman if name == "hangman" else Wordmix
-            game = self.games[name] = kind(settings.words, settings.show_solution, now, self._rng)
+            if not self._may_start_games(command):
+                return
+            if name == "hangman":
+                game = Hangman(
+                    settings.words, settings.show_solution, now, self._rng, sign=sign, picture=settings.picture
+                )
+            else:
+                game = Wordmix(settings.words, settings.show_solution, now, self._rng, sign=sign, hints=settings.hint)
+            self.games[name] = game
             self.say(*game.start())
         if not game.running:
             del self.games[name]
@@ -315,10 +323,12 @@ class Bot:
         else:
             quizzes = self.config.quizzes
             if not command.param or not quizzes:
-                self.say(*quiz_menu(quizzes))
+                self.say(*quiz_menu(quizzes, self.config.command_sign))
                 return
             if not command.param.isdigit() or not 1 <= int(command.param) <= len(quizzes):
                 self.say(f"{html.escape(command.param)} ist keine gültige ID.")
+                return
+            if not self._may_start_games(command):
                 return
             game = self.games["quiz"] = Quiz(
                 quizzes[int(command.param) - 1], self.config.quiz_show_solution, now, self._rng
@@ -335,7 +345,9 @@ class Bot:
         if self.level(victim) == Level.IGNORED:
             self.say("Mit ignorierten Usern spiele ich nicht!")
             return
-        game = Timebomb(command.user, victim, self._clock().timestamp(), self._rng)
+        if not self._may_start_games(command):
+            return
+        game = Timebomb(command.user, victim, self._clock().timestamp(), self._rng, sign=self.config.command_sign)
         self.games["zeitbombe"] = game
         self.say(*game.start())
 
@@ -347,6 +359,33 @@ class Bot:
         self.say(*game.cut(command.user, command.param))
         if not game.running:
             del self.games["zeitbombe"]
+
+    async def _potato(self, command: Command) -> None:
+        game = self.games.get("kartoffel")
+        if isinstance(game, HotPotato):
+            self.say(*game.join(command.user))
+            return
+        if not self._may_start_games(command):
+            return
+        game = self.games["kartoffel"] = HotPotato(
+            command.user, self._clock().timestamp(), self._rng, sign=self.config.command_sign
+        )
+        self.say(*game.start())
+
+    async def _throw(self, command: Command) -> None:
+        game = self.games.get("kartoffel")
+        if not isinstance(game, HotPotato):
+            self.say("Es läuft doch gar kein Spiel!")
+            return
+        self.say(*game.throw(command.user, self._clock().timestamp()))
+        if not game.running:
+            del self.games["kartoffel"]
+
+    def _may_start_games(self, command: Command) -> bool:
+        if command.level >= self.config.can_start_games:
+            return True
+        self.reply(command, f"{html.escape(command.user)}, du darfst leider keine Spiele starten.")
+        return False
 
     # -- greetings and KI
 
@@ -367,6 +406,8 @@ class Bot:
 
     def _patterns(self, event: Message | Whisper, level: Level) -> None:
         """The KI: reactions to messages that contain a text or match a regex."""
+        if isinstance(event, Whisper) and not self.config.ki_whisper:
+            return
         guest = level == Level.GUEST
         for entry in self.config.patterns:
             if guest and not entry.guest_reaction:
@@ -449,4 +490,6 @@ _SYSTEM_COMMANDS: dict[str, Callable[[Bot, Command], Awaitable[None]]] = {
     "quiz": Bot._quiz,
     "zeitbombe": Bot._timebomb,
     "schneide": Bot._cut,
+    "kartoffel": Bot._potato,
+    "wurf": Bot._throw,
 }

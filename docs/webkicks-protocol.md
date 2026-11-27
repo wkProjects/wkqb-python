@@ -124,6 +124,9 @@ answers compared (`wkqb.events.plain()` also removes the kept tags).
 
 - Smileys: `<span onclick="javascript: repClick('hm')" style="cursor: pointer;"><img src="/<chat>/replacer/hm.gif"
   alt="&#58;hm"></span>` for `:hm`.
+  The longest code wins (`:hangman10` is the `hangman10` smiley, not `hangman1` followed by "0"), but a code is
+  also found as the start of a longer word: with a smiley `:hm`, `:hm3` shows as that smiley followed by "3". Codes
+  without a smiley stay text.
 
 ### Rooms
 

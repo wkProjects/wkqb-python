@@ -174,3 +174,34 @@ async def test_load_invalid_json(tmp_path: Path, session: aiohttp.ClientSession)
     file.write_text("{kaputt", encoding="utf-8")
     with pytest.raises(ConfigError, match="JSONDecodeError"):
         await load(session, {"WKQB_CONFIG_FILE": str(file)})
+
+
+def test_game_settings() -> None:
+    config, warnings = parse(
+        {
+            "command_sign": " # ",
+            "can_start_games": 2,
+            "hangman": {"words": ["x"], "picture": ":hangman{n}"},
+            "pattern": {"whisper": False},
+            "wordmix": {"words": ["y"], "hint": True},
+        }
+    )
+    assert warnings == []
+    assert (config.command_sign, config.can_start_games) == ("#", 2)
+    assert config.hangman.picture == ":hangman{n}"
+    assert config.wordmix.hint and config.wordmix.picture is None
+    assert not config.ki_whisper
+
+
+@pytest.mark.parametrize("sign", ["/", "/x", "123456", "a b", ""])
+def test_invalid_command_signs(sign: str) -> None:
+    config, warnings = parse({"command_sign": sign})
+    assert config.command_sign == "!"
+    assert len(warnings) == 1
+
+
+def test_defaults_of_game_settings() -> None:
+    config, warnings = parse({"can_start_games": 9, "hangman": {"picture": ":hangman"}})
+    assert (config.command_sign, config.can_start_games, config.hangman.picture) == ("!", 4, None)
+    assert config.ki_whisper  # as before
+    assert warnings == ["Hangman: ungültige Bild-Vorlage, es wird nur Text ausgegeben."]

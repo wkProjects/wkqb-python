@@ -9,7 +9,7 @@ from wkqb.bot import Bot, Level
 from wkqb.config import CalendarEntry, Config, ConfigError, GuestMode, parse
 from wkqb.cron import TIMEZONE
 from wkqb.events import FloodWarning, Login, Logout, Message, RoomEnter, SystemMessage, Unparsed, Whisper
-from wkqb.games import Timebomb
+from wkqb.games import HotPotato, Timebomb
 from wkqb.outbox import Outbox
 
 CONFIG = Config(
@@ -445,6 +445,13 @@ async def test_ki_answers_whispers_by_whisper() -> None:
     assert said(bot) == ["/f Emil Hi Emil!"]
 
 
+async def test_ki_can_ignore_whispers() -> None:
+    bot, _, _ = make(configured(pattern={**KI["pattern"], "whisper": False}))
+    await bot.handle(Whisper("Emil", False, "12:34", "hallo wkQB"))
+    await bot.handle(msg("Emil", "hallo wkQB"))
+    assert said(bot) == ["Hi Emil!"]
+
+
 WORDS = {"hangman": {"show_solution": True, "words": ["Katze"]}, "wordmix": {"show_solution": True, "words": ["ab"]}}
 
 
@@ -553,3 +560,63 @@ async def test_timebomb() -> None:
     clock.now += timedelta(seconds=30)
     bot.tick()
     assert said(bot) == ["&lt;i&gt;x&lt;/i&gt; hat es nicht rechtzeitig geschafft, die Bombe zu entschärfen :-("]
+
+
+async def test_command_sign() -> None:
+    bot, _, _ = make(configured(command_sign="#", **KI))
+    await bot.handle(msg("Emil", "#ping"))
+    await bot.handle(msg("Emil", "!ping"))  # no command now
+    await bot.handle(msg("Emil", "!ping Bot"))  # but KI
+    assert said(bot) == ["Pong!", "Wer, ich?"]
+
+
+async def test_only_some_may_start_games() -> None:
+    bot, _, _ = make(configured(can_start_games=2, **WORDS, **QUIZ))
+    for text in ["!hangman", "!wordmix", "!quiz 1", "!zeitbombe Dora", "!kartoffel"]:
+        await bot.handle(msg("Emil", text))
+    assert said(bot) == ["Emil, du darfst leider keine Spiele starten."] * 5
+    await bot.handle(Whisper("Emil", False, "12:34", "!hangman"))
+    assert said(bot) == ["/f Emil Emil, du darfst leider keine Spiele starten."]
+    await bot.handle(msg("Emil", "!quiz"))  # the list is for everyone
+    assert said(bot)[0].startswith("Ich habe folgende Quizze")
+
+    await bot.handle(msg("Bert", "!hangman"))
+    said(bot)
+    await bot.handle(msg("Emil", "!hangman k"))  # playing is for everyone
+    assert said(bot) == ["Emil, der Buchstabe K kommt vor: K _ _ _ _"]
+
+
+async def test_hot_potato() -> None:
+    bot, clock, _ = make(configured())
+    await bot.handle(msg("Emil", "!wurf"))
+    assert said(bot) == ["Es läuft doch gar kein Spiel!"]
+    await bot.handle(msg("Emil", "!kartoffel"))
+    assert said(bot)[0].startswith("Emil startet Heiße Kartoffel!")
+    await bot.handle(msg("Dora", "!kartoffel"))
+    await bot.handle(msg("Bert", "!kartoffel"))
+    assert said(bot) == ["Dora spielt mit! (2 Spieler)", "Bert spielt mit! (3 Spieler)"]
+    clock.now += timedelta(seconds=60)
+    bot.tick()
+    lines = said(bot)
+    game = bot.games["kartoffel"]
+    assert isinstance(game, HotPotato) and game.holder is not None
+    assert lines[1] == f"Die heiße Kartoffel fliegt zu <b>{game.holder}</b>! Schnell, <b>!wurf</b>!"
+    game.cold_after = 1
+    await bot.handle(msg(game.holder, "!wurf"))
+    assert said(bot) == ["Die Kartoffel ist kalt! Gewonnen haben: Emil, Dora, Bert"]
+    assert bot.games == {}
+
+
+async def test_hangman_pictures_and_wordmix_hints_from_the_settings() -> None:
+    settings = {
+        "hangman": {"words": ["Katze"], "picture": '<img src="https://x/hm{n}.gif">'},
+        "wordmix": {"words": ["Katze"], "hint": True},
+    }
+    bot, clock, _ = make(configured(**settings))
+    await bot.handle(msg("Emil", "!hangman"))
+    await bot.handle(msg("Emil", "!wordmix"))
+    lines = said(bot)
+    assert lines[0].endswith('<img src="https://x/hm0.gif">')
+    clock.now += timedelta(seconds=60)
+    bot.tick()
+    assert "Tipp: Das Wort beginnt mit <b>K</b>." in said(bot)

@@ -4,10 +4,13 @@ import pytest
 
 from wkqb.games import (
     HANGMAN_TIMEOUT,
+    POTATO_SIGNUP,
+    POTATO_THROW_TIME,
     QUIZ_QUESTION_TIME,
     WIRES,
     WORDMIX_TIME,
     Hangman,
+    HotPotato,
     Question,
     Quiz,
     QuizSet,
@@ -182,3 +185,112 @@ class TestQuiz:
         ]
         assert game.tick(2 * QUIZ_QUESTION_TIME)[-1] == "Das waren alle Fragen, das Quiz ist daher beendet!"
         assert not game.running
+
+
+def test_command_sign_in_the_texts() -> None:
+    assert "<b>#hangman BUCHSTABE</b>" in Hangman(["Katze"], True, now=0, rng=rng(), sign="#").start()[1]
+    assert "<b>#wordmix LÖSUNG</b>" in Wordmix(["Katze"], True, now=0, rng=rng(), sign="#").start()[1]
+    assert "<b>#schneide FARBE</b>" in Timebomb("a", "b", now=0, rng=rng(), sign="#").start()[1]
+    assert quiz_menu(QUIZZES, "&")[1] == "Sende &amp;quiz ID, um das gewünschte Quiz zu starten!"
+
+
+def test_hangman_pictures() -> None:
+    url = '<img src="https://wkqb.de/hangman/gerade/ff6600/hm{n}.gif">'
+    game = Hangman(["Katze"], True, now=0, rng=rng(), picture=url)
+    assert game.start()[0].endswith('(5 Zeichen) <img src="https://wkqb.de/hangman/gerade/ff6600/hm0.gif">')
+    assert game.guess("anna", "k", 1) == ["anna, der Buchstabe K kommt vor: K _ _ _ _"]  # no new picture
+    assert game.guess("anna", "x", 2)[1].endswith(
+        'Verbleibende Versuche: 9 <img src="https://wkqb.de/hangman/gerade/ff6600/hm1.gif">'
+    )
+
+
+def test_hangman_smileys_and_the_last_picture() -> None:
+    game = Hangman(["Katze"], False, now=0, rng=rng(), picture=":hangman{n}")
+    assert game.start()[0].endswith("(5 Zeichen) :hangman0")
+    for i, word in enumerate(["Hund", "Maus", "Igel"]):
+        game.guess("anna", word, i)
+    assert game.guess("anna", "Wurm", 4)[1] == "Leider sind alle Versuche aufgebraucht :-( :hangman10"
+
+
+class TestWordmixHints:
+    def test_hints(self) -> None:
+        game = Wordmix(["Gemüse"], True, now=0, rng=rng(), hints=True)
+        assert game.tick(59) == []
+        assert game.tick(60) == ["Tipp: Das Wort beginnt mit <b>G</b>."]
+        assert game.tick(61) == []
+        assert game.tick(90) == ["Tipp: Das Wort beginnt mit <b>G</b> und endet mit <b>e</b>."]
+        assert game.tick(100) == []
+        assert game.tick(WORDMIX_TIME)[0] == "Die Zeit für Wordmix ist abgelaufen!"
+
+    def test_no_hints(self) -> None:
+        game = Wordmix(["Gemüse"], True, now=0, rng=rng())
+        assert game.tick(95) == []
+
+    def test_no_hints_after_the_end(self) -> None:
+        game = Wordmix(["Gemüse"], True, now=0, rng=rng(), hints=True)
+        game.guess("anna", "gemüse", 10)
+        assert game.tick(95) == []
+
+
+class TestHotPotato:
+    def game(self) -> HotPotato:
+        game = HotPotato("anna", now=0, rng=rng())
+        game.join("bert")
+        game.join("cem")
+        return game
+
+    def test_signup(self) -> None:
+        game = HotPotato("anna", now=0, rng=rng(), sign="#")
+        assert "<b>#kartoffel</b>" in game.start()[0] and "<b>#wurf</b>" in game.start()[0]
+        assert game.join("Bert") == ["Bert spielt mit! (2 Spieler)"]
+        assert game.join("bert") == ["bert, du spielst doch schon mit!"]
+        assert game.join("ANNA") == ["ANNA, du spielst doch schon mit!"]
+        assert game.throw("anna", 1) == ["anna, du hast die Kartoffel doch gar nicht!"]
+        assert game.tick(POTATO_SIGNUP - 1) == []
+
+    def test_too_few_players(self) -> None:
+        game = HotPotato("anna", now=0, rng=rng())
+        game.join("bert")
+        assert game.tick(POTATO_SIGNUP) == ["Für Heiße Kartoffel braucht es mindestens 3 Spieler, das Spiel fällt aus."]
+        assert not game.running
+
+    def test_throws_until_cold(self) -> None:
+        game = self.game()
+        lines = game.tick(POTATO_SIGNUP)
+        assert lines[0] == "Es spielen mit: anna, bert, cem"
+        assert (
+            game.holder in ("anna", "bert", "cem")
+            and lines[1] == f"Die heiße Kartoffel fliegt zu <b>{game.holder}</b>! Schnell, <b>!wurf</b>!"
+        )
+        assert game.join("dora") == ["Das Spiel läuft schon, du musst bis zum nächsten warten."]
+        now = POTATO_SIGNUP
+        for _ in range(game.cold_after - 1):
+            now += 1
+            assert game.holder is not None
+            other = next(p for p in game.players if p != game.holder)
+            assert game.throw(other, now) == [f"{other}, du hast die Kartoffel doch gar nicht!"]
+            assert game.throw(game.holder.upper(), now)[0].startswith("Die heiße Kartoffel fliegt zu")
+            assert game.deadline == now + POTATO_THROW_TIME
+        assert game.holder is not None
+        assert game.throw(game.holder, now + 1) == ["Die Kartoffel ist kalt! Gewonnen haben: anna, bert, cem"]
+        assert not game.running
+
+    def test_too_slow(self) -> None:
+        game = self.game()
+        game.tick(POTATO_SIGNUP)
+        first = game.holder
+        lines = game.tick(POTATO_SIGNUP + POTATO_THROW_TIME)
+        assert lines[0] == f"{first} war zu langsam und hat sich die Finger verbrannt!"
+        assert first not in game.players and len(game.players) == 2
+        second = game.holder
+        lines = game.tick(POTATO_SIGNUP + 2 * POTATO_THROW_TIME)
+        [winner] = game.players
+        assert lines == [f"{second} war zu langsam und hat sich die Finger verbrannt!", f"{winner} hat gewonnen!"]
+        assert not game.running
+
+    def test_cold_after_10_to_20_throws(self) -> None:
+        assert {HotPotato("a", now=0, rng=random.Random(seed)).cold_after for seed in range(200)} == set(range(10, 21))
+
+    def test_names_are_escaped(self) -> None:
+        game = HotPotato("<b>", now=0, rng=rng())
+        assert game.start()[0].startswith("&lt;b&gt; startet Heiße Kartoffel!")

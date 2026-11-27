@@ -9,7 +9,7 @@ import asyncio
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import IntEnum
 from pathlib import Path
 from typing import Any
@@ -72,11 +72,21 @@ class Pattern:
 class WordGame:
     show_solution: bool = False
     words: Sequence[str] = ()
+    picture: str | None = None
+    """Hangman: the picture for the used tries, "{n}" is their number (0-10), e.g. ':hangman{n}' or an <img>
+    tag; None for text only"""
+    hint: bool = False
+    """Wordmix: give hints"""
 
 
 @dataclass(frozen=True, slots=True)
 class Config:
     guest_mode: GuestMode = GuestMode.IGNORE
+    command_sign: str = "!"
+    can_start_games: int = 0
+    """Level needed to start a game"""
+    ki_whisper: bool = True
+    """KI entries also react to whispers"""
     jointext: str = ""
     quote_cron: str | None = None
     """None: no scheduled quotes"""
@@ -178,6 +188,20 @@ def parse(data: Any) -> tuple[Config, list[str]]:
     except ValueError:
         guest_mode = GuestMode.IGNORE
 
+    # as wkqb-web checks it: 1-5 characters, not a chat command
+    sign = _str(data.get("command_sign", "!")).strip()
+    if not sign or sign.startswith("/") or len(sign) > 5 or any(ch.isspace() for ch in sign):
+        warnings.append(f'Ungültiges Befehlszeichen {sign!r}, es gilt "!".')
+        sign = "!"
+
+    hangman = _word_game(data.get("hangman"))
+    picture = _str(_dict(data.get("hangman")).get("picture")).strip()
+    if picture:
+        if "{n}" in picture:
+            hangman = replace(hangman, picture=picture)
+        else:
+            warnings.append("Hangman: ungültige Bild-Vorlage, es wird nur Text ausgegeben.")
+
     config = Config(
         guest_mode=guest_mode,
         jointext=_str(data.get("jointext")),
@@ -194,8 +218,11 @@ def parse(data: Any) -> tuple[Config, list[str]]:
         ignored=_names(users.get("ignored")),
         commands=commands,
         patterns=patterns,
-        hangman=_word_game(data.get("hangman")),
-        wordmix=_word_game(data.get("wordmix")),
+        command_sign=sign,
+        can_start_games=min(4, max(0, _int(data.get("can_start_games")))),
+        ki_whisper=bool(_dict(data.get("pattern")).get("whisper", True)),
+        hangman=hangman,
+        wordmix=replace(_word_game(data.get("wordmix")), hint=bool(_dict(data.get("wordmix")).get("hint"))),
         quiz_show_solution=bool(quiz.get("show_solution")),
         quizzes=quizzes,
     )
