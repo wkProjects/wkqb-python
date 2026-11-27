@@ -30,8 +30,6 @@ build-backend = "uv_build"
 [tool.ruff]
 line-length = 120
 src = ["src", "tests"]
-# the old bot in the repository root is replaced step by step and not linted
-include = ["src/**/*.py", "tests/**/*.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ASYNC"]
@@ -49,6 +47,6 @@ mypy_path = "tests"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-# keeps the repository root (the old bot's wkqb.py) off sys.path; the test helpers are in tests/
+# the test helpers (fake_webkicks) are imported from tests/
 addopts = ["--import-mode=importlib"]
 pythonpath = ["tests"]

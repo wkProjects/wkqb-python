@@ -153,6 +153,21 @@ async def test_errors_in_the_bot_are_logged(
         fake.push(message("Dora", "kaputt") + message("Dora", "!ping"))
         await until(lambda: fake.messages[-1:] == ["Pong!"])
     assert "Fehler bei Message" in caplog.text and "RuntimeError: bug" in caplog.text
+    assert "kaputt" not in caplog.text  # chat texts only at DEBUG
+
+
+async def test_debug_logs_the_chat_lines_without_secrets(
+    fake: FakeWebkicks, runner_factory: Callable[..., Runner], caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    async with running(runner_factory()):
+        await chat_started(fake)
+        fake.push(message("Dora", "geheim? 88AbCdEfGhIjK") + KEEP_ALIVE)
+        await until(lambda: "Dora" in caplog.text)
+    # the bot's records only: the fake server's access log has the sid in its URLs
+    logged = "\n".join(r.getMessage() for r in caplog.records if r.name.startswith("wkqb"))
+    assert "geheim? <sid>" in logged
+    assert "88AbCdEfGhIjK" not in logged and "update //" not in logged
 
 
 async def test_waits_for_the_settings(fake: FakeWebkicks, runner_factory: Callable[..., Runner]) -> None:

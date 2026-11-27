@@ -3,6 +3,7 @@
 The pod is never restarted by Kubernetes, and wkqb-web reads exit code 0 as "stopped on purpose",
 so the bot only ends with 0 on !quit, SIGTERM/SIGINT or when its account logs in elsewhere. Lost
 sessions (the nightly maintenance, timeouts, network errors) are handled here by logging in again.
+Chat lines are only logged at DEBUG (wkqb-web's debug mode, see its privacy policy).
 Exit code 1 means it gave up: no working chat session for GIVE_UP_AFTER, e.g. after a password
 change, so wkqb-web's check of the credentials decides about a restart.
 """
@@ -19,8 +20,9 @@ import aiohttp
 from wkqb import config as settings
 from wkqb.bot import Bot
 from wkqb.config import Config, ConfigError
-from wkqb.events import ChatStarted, Logout, TakenOver, parse_line
+from wkqb.events import ChatStarted, KeepAlive, Logout, TakenOver, parse_line
 from wkqb.outbox import INTERVAL, Outbox
+from wkqb.redaction import redact, secrets
 from wkqb.stream import LineSplitter
 from wkqb.webkicks import ChatUrl, Credentials, Webkicks
 
@@ -163,12 +165,17 @@ class Runner:
                     if not chat_started:
                         continue  # the HTML header
                     self._last_chat = time.monotonic()
+                    if logger.isEnabledFor(logging.DEBUG) and not isinstance(event, KeepAlive):
+                        found = secrets(sid=client.sid, stream=client.stream_token)
+                        logger.debug("< %s", redact(line, found))
                     if isinstance(event, Logout) and event.user.casefold() == bot.name.casefold():
                         logger.info("Der Bot hat den Chat verlassen%s", " (Timeout)" if event.timed_out else "")
                     try:
                         await bot.handle(event)
                     except Exception:
-                        logger.exception("Fehler bei %r", event)
+                        # without the event: chat texts are only logged at DEBUG (privacy policy)
+                        logger.exception("Fehler bei %s", type(event).__name__)
+                        logger.debug("Fehler bei %r", event)
         logger.info("Webkicks hat den Stream geschlossen")
         return End.LOST
 

@@ -3,7 +3,8 @@
 Normal accounts are warned when the 4th message follows three gaps of 1.5 s or less, and kicked at
 the third warning (see docs/webkicks-protocol.md). The outbox keeps INTERVAL between two messages.
 It outlives the chat sessions: messages queued while the bot reconnects are sent afterwards, unless
-they waited longer than MAX_AGE (a greeting minutes later would be odd).
+they waited longer than MAX_AGE (a greeting minutes later would be odd). Chat texts are only logged
+at DEBUG (see the privacy policy of wkqb.de).
 """
 
 import asyncio
@@ -46,7 +47,8 @@ class Outbox:
             if not text.strip():
                 continue
             if len(self._queue) >= self._max_queued:
-                logger.warning("Ausgabe-Warteschlange voll, Nachricht verworfen: %.60s", text)
+                logger.warning("Ausgabe-Warteschlange voll, Nachricht verworfen")
+                logger.debug("Verworfen: %s", text)
                 continue
             self._queue.append(_Queued(text, time.monotonic()))
         if self._queue:
@@ -86,15 +88,17 @@ class Outbox:
             message = self._queue[0]
             if time.monotonic() - message.since > self._max_age:
                 self._queue.popleft()
-                logger.info("Nachricht zu lange in der Warteschlange, verworfen: %.60s", message.text)
+                logger.info("Nachricht zu lange in der Warteschlange, verworfen")
+                logger.debug("Verworfen: %s", message.text)
                 self._check_empty()
                 continue
             try:
+                logger.debug("> %s", message.text)
                 await send(message.text)
             except NotLoggedIn:
                 raise
             except Exception as e:
-                logger.warning("Nachricht nicht gesendet (%s: %s): %.60s", type(e).__name__, e, message.text)
+                logger.warning("Nachricht nicht gesendet (%s: %s)", type(e).__name__, e)
             self._queue.popleft()
             self._last_sent = time.monotonic()
             self._check_empty()

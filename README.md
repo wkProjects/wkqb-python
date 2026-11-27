@@ -3,8 +3,8 @@
 The chat bot of [wkqb.de](https://wkqb.de) for Webkicks chats. The web interface (wkqb-web) starts it as a
 Kubernetes pod and serves its configuration.
 
-The bot is being rewritten with asyncio in `src/wkqb/`. Until that is finished, the image still runs the old bot
-(`app.py` and the other modules in the repository root).
+The bot (`src/wkqb/`, asyncio) runs as `wkqb` in the image `ghcr.io/wkprojects/wkqb:<branch>`; every push builds
+the image of its branch, and bots use `main` unless their `b_branch` in wkqb-web's database says otherwise.
 
 ## Development
 

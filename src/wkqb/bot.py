@@ -243,7 +243,8 @@ class Bot:
     async def _quit(self, command: Command) -> None:
         if command.level >= Level.ADMIN:
             self.say("Oh je, ich muss wohl gehen :-(")
-            logger.info("Beendet durch !quit von %s", command.user)
+            logger.info("Beendet durch !quit")
+            logger.debug("!quit von %s", command.user)
             self.quit.set()
 
     async def _master(self, command: Command) -> None:
