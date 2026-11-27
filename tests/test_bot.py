@@ -125,8 +125,10 @@ async def test_say() -> None:
     bot, _, _ = make()
     await bot.handle(msg("Dora", "!say Hallo"))
     await bot.handle(msg("Bert", "!say"))
-    await bot.handle(msg("Bert", "!say <b>Hallo</b> /me"))
-    assert said(bot) == ["<b>Hallo</b> /me"]
+    # what a normal user typed as text (Webkicks escaped it, the parser decoded it) stays text
+    await bot.handle(msg("Bert", "!say <img src=x onerror=alert(1)> & /me"))
+    await bot.handle(msg("Bert", "!say /kick Spam"))
+    assert said(bot) == ["&lt;img src=x onerror=alert(1)&gt; &amp; /me", "/kick Spam"]
 
 
 async def test_reload(caplog: pytest.LogCaptureFixture) -> None:

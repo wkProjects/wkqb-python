@@ -2,6 +2,12 @@
 
 The Bot does no I/O itself: answers go into the outbox, settings come through the reload callback,
 and the runner (wkqb.runner) feeds it the events and calls tick() every second.
+
+HTML: texts the managers entered in the web interface (reactions, quotes, greetings, words, ...)
+are sent unchanged. If the bot is a chat admin, all of their HTML works; otherwise Webkicks keeps
+only its whitelist (docs/webkicks-protocol.md), and the bot doesn't try to convert anything.
+Everything that comes from the chat (parameters, names, matched text, guesses) is escaped, so
+nobody can send HTML through the bot, whatever rights it has in the chat.
 """
 
 import asyncio
@@ -217,7 +223,8 @@ class Bot:
 
     async def _say(self, command: Command) -> None:
         if command.level >= Level.ADMIN and command.param:
-            self.say(command.param)
+            # chat text like the rest: a bot admin needn't be a chat admin
+            self.say(html.escape(command.param))
 
     async def _reload_command(self, command: Command) -> None:
         if command.level < Level.MOD:

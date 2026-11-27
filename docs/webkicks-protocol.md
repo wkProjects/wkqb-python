@@ -103,9 +103,25 @@ the expected events.
 
 ### Text
 
-- Webkicks escapes `"` (`&quot;`) and `'` (`&#x27;`) in messages of normal users, but not `&`, `<` or `>`:
-  `<b>fett</b>` arrives as HTML. Umlauts and emoji arrive as UTF-8. Texts must be HTML-unescaped before commands
-  are parsed or answers compared.
+Messages of normal users (not chat admins) may only contain a few tags; everything else arrives escaped
+(`<em>` as `&lt;em&gt;`), so it shows as text. Measured on 2026-11-27 with a normal account:
+
+| Kept | Escaped |
+| --- | --- |
+| `<b>`, `<i>`, `<u>`, `<s>`, `<small>`, `<sup>`, `<sub>`, without attributes | `<strong>`, `<em>`, `<strike>`, `<del>`, `<big>`, `<tt>`, `<code>`, `<span>`, `<br>`, `<p>`, `<div>`, `<center>`, `<h3>`, `<hr>`, `<a>`, `<img>`, `<marquee>`, `<blink>`, unknown tags |
+| `<font>` with `color` (names and `#rrggbb`) and `face`, unquoted | `<font>` with quoted values or `style`; any tag with `class` or `style` |
+| closing tags (also without an opening one) | |
+
+- Tag and attribute names are lower-cased (`<FONT COLOR=green>` arrives as `<font color=green>`).
+- `size` is removed from `<font>`; a `<font>` without attributes left is escaped.
+- `"` and `'` become `&quot;` and `&#x27;`, which is why quoted attribute values never work.
+- `&`, entities typed by the user (`&auml;`, `&lt;`) and unclosed tags (`<b>offen`) arrive unchanged.
+- Umlauts and emoji arrive as UTF-8.
+
+So the HTML of a bot that is no chat admin is limited the same way: wkQB's own `<b>` works, but custom commands
+with links, images or quoted attributes show as text. Texts must be HTML-unescaped before commands are parsed or
+answers compared (`wkqb.events.plain()` also removes the kept tags).
+
 - Smileys: `<span onclick="javascript: repClick('hm')" style="cursor: pointer;"><img src="/<chat>/replacer/hm.gif"
   alt="&#58;hm"></span>` for `:hm`.
 

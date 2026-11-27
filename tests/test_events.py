@@ -141,6 +141,10 @@ def test_parser_errors_become_unparsed(monkeypatch: pytest.MonkeyPatch) -> None:
             ":hm!",
         ),
         ('a<script language="JavaScript">x("<b>");</script>b', "ab"),
+        # as recorded from a normal account: rejected tags arrive escaped, typed entities unchanged
+        ("<s>s</s> &lt;strike&gt;strike&lt;/strike&gt;", "s <strike>strike</strike>"),
+        ("&lt;font &gt;size</font>", "<font >size"),
+        ("&auml; &amp; &lt;b&gt; &#58;", "ä & <b> :"),
         ("  padded  ", "padded"),
     ],
 )
