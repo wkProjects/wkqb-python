@@ -2,12 +2,50 @@
 
 import asyncio
 from dataclasses import dataclass, field
+from typing import Any
 
 from aiohttp import web
 
 CID = "testchat"
 #: Followed by the number of the stream
 STREAM_TOKEN = "StReAmToKeN"
+
+# Stream lines in the markup recorded from Webkicks (see tests/fixtures/lines-*.jsonl)
+_ROW = "<table border=0><tr><td valign=bottom>{}</td></tr></table>\n"
+_TIME = "<FONT SIZE=-2>(12:34)</FONT> "
+CHAT_STARTED = '<!-- update!! //-->\n<div id="soundcontainer"></div>\n'
+KEEP_ALIVE = "<!-- update //-->\n"
+TAKEN_OVER = "<font color=red>Connection Closed (multiple Login detected)</font><br>\n"
+HEADER = '<!DOCTYPE html>\n<html lang="de">\n<body>\npowered by <a href="https://www.webkicks.de">x</a>\n<hr>\n'
+
+
+def message(user: str, text: str, guest: bool = False) -> str:
+    title = f"{user} (Gast)" if guest else user
+    return _ROW.format(
+        f'{_TIME}<b><font title="{title}"><span onclick="fluester(\'{user}\')"><b>{user}</b></span></b>: {text}</font>'
+    )
+
+
+def whisper(user: str, text: str) -> str:
+    return _ROW.format(
+        f"{_TIME}<b><span onclick=\"fluester('{user}')\">{user} fl&uuml;stert</span>: <font color=red>{text}</font>"
+    )
+
+
+def login(user: str, guest: bool = False) -> str:
+    title = f"{user} (Gast)" if guest else user
+    return _ROW.format(
+        f'{_TIME}<font title="{title}"><img src="/gruen.gif"><login {user} /><B><i>'
+        f"<span onclick=\"fluester('{user}')\"><b>{user}</b></span>"
+        '<span class="commandcolor"> betritt den Chat</b></span></i>'
+    )
+
+
+def logout(user: str) -> str:
+    return _ROW.format(
+        f'{_TIME}<font title="{user}"><img src="/rot.gif"><B><i><span onclick="fluester(\'{user}\')"><b>{user}</b>'
+        '</span><span class="commandcolor"> verlässt den Chat</b></span></i></font>'
+    )
 
 
 @dataclass
@@ -38,6 +76,8 @@ class FakeWebkicks:
     streams_opened: int = 0
     _queues: list[asyncio.Queue[bytes | None]] = field(default_factory=list)
     stream_connected: asyncio.Event = field(default_factory=asyncio.Event)
+    config: Any = field(default_factory=dict)
+    """Served as the bot's settings at /api/config.php"""
 
     def app(self) -> web.Application:
         app = web.Application()
@@ -47,7 +87,18 @@ class FakeWebkicks:
         app.router.add_get(f"/{CID}/chatstream/{{user}}/{{token}}/stream", self._stream)
         app.router.add_get(f"/{CID}/tok/{{user}}/{{sid}}/{{millis}}", self._tok)
         app.router.add_post("/cgi-bin/chat.cgi", self._send)
+        app.router.add_get("/api/config.php", self._config)
         return app
+
+    @property
+    def messages(self) -> list[str]:
+        """The texts sent to the chat"""
+        return [message for _, message in self.sent]
+
+    async def _config(self, request: web.Request) -> web.Response:
+        if failure := self._failure("config"):
+            return failure
+        return web.json_response(self.config)
 
     def push(self, data: str | bytes) -> None:
         """Sends data on the current stream."""

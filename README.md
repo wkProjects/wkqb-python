@@ -19,6 +19,17 @@ uv run mypy
 
 The tests use a fake Webkicks server (`tests/fake_webkicks.py`), never the real chat.
 
+Run the new bot locally with a settings file instead of the web interface:
+
+```sh
+set -a; . ./bot.env; set +a     # WK_CHATURL, WK_USERNAME, WK_PASSWORD
+WKQB_CONFIG_FILE=config.json uv run wkqb
+```
+
+It logs in again by itself when the chat session ends (e.g. the nightly maintenance) and only exits on `!quit`,
+SIGTERM/SIGINT or when its account logs in elsewhere (exit code 0), or with 1 after 30 minutes without a working
+session. The Webkicks protocol as far as known is in `docs/webkicks-protocol.md`.
+
 ## Tracer
 
 `wkqb-tracer` records everything a chat account sees, to learn how Webkicks behaves (message format,

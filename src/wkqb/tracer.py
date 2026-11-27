@@ -24,14 +24,13 @@ import signal
 import sys
 import time
 import traceback
-from collections.abc import Mapping
 from pathlib import Path
 
 import aiohttp
 
 from wkqb import USER_AGENT
 from wkqb.recorder import Recorder
-from wkqb.webkicks import ChatUrl, Credentials, Webkicks
+from wkqb.webkicks import ChatUrl, Credentials, Webkicks, from_env
 
 #: Seconds without any stream data until the stream counts as dead
 READ_TIMEOUT = 900.0
@@ -222,11 +221,7 @@ def read_env_file(path: Path) -> dict[str, str]:
     return values
 
 
-def settings(env: Mapping[str, str]) -> tuple[ChatUrl, Credentials]:
-    missing = [k for k in ("WK_CHATURL", "WK_USERNAME", "WK_PASSWORD") if not env.get(k)]
-    if missing:
-        raise ValueError(f"missing: {', '.join(missing)}")
-    return ChatUrl.parse(env["WK_CHATURL"]), Credentials(env["WK_USERNAME"], env["WK_PASSWORD"])
+settings = from_env
 
 
 def main(argv: list[str] | None = None) -> int:

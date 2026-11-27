@@ -36,6 +36,8 @@ class Outbox:
         self._max_queued = max_queued
         self._queue: deque[_Queued] = deque()
         self._waiting = asyncio.Event()
+        self._empty = asyncio.Event()
+        self._empty.set()
         self._last_sent = float("-inf")
 
     def put(self, *texts: str) -> None:
@@ -49,9 +51,23 @@ class Outbox:
             self._queue.append(_Queued(text, time.monotonic()))
         if self._queue:
             self._waiting.set()
+            self._empty.clear()
 
     def __len__(self) -> int:
         return len(self._queue)
+
+    def pending(self) -> list[str]:
+        """The queued texts, oldest first."""
+        return [message.text for message in self._queue]
+
+    async def empty(self) -> None:
+        """Waits until everything queued was sent (or dropped)."""
+        await self._empty.wait()
+
+    def _check_empty(self) -> None:
+        if not self._queue:
+            self._waiting.clear()
+            self._empty.set()
 
     async def run(self, send: Callable[[str], Awaitable[None]]) -> None:
         """Sends the queued messages until cancelled (at the end of a chat session).
@@ -65,12 +81,13 @@ class Outbox:
             if pause > 0:
                 await asyncio.sleep(pause)
             if not self._queue:
-                self._waiting.clear()
+                self._check_empty()
                 continue
             message = self._queue[0]
             if time.monotonic() - message.since > self._max_age:
                 self._queue.popleft()
                 logger.info("Nachricht zu lange in der Warteschlange, verworfen: %.60s", message.text)
+                self._check_empty()
                 continue
             try:
                 await send(message.text)
@@ -80,5 +97,4 @@ class Outbox:
                 logger.warning("Nachricht nicht gesendet (%s: %s): %.60s", type(e).__name__, e, message.text)
             self._queue.popleft()
             self._last_sent = time.monotonic()
-            if not self._queue:
-                self._waiting.clear()
+            self._check_empty()

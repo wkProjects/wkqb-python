@@ -68,6 +68,14 @@ class Credentials:
     password: str = field(repr=False)
 
 
+def from_env(env: Mapping[str, str]) -> tuple[ChatUrl, Credentials]:
+    """The chat and account from WK_CHATURL, WK_USERNAME and WK_PASSWORD (see wkqb-web's BotManifests)."""
+    missing = [k for k in ("WK_CHATURL", "WK_USERNAME", "WK_PASSWORD") if not env.get(k)]
+    if missing:
+        raise ValueError(f"missing: {', '.join(missing)}")
+    return ChatUrl.parse(env["WK_CHATURL"]), Credentials(env["WK_USERNAME"].strip(), env["WK_PASSWORD"])
+
+
 class Webkicks:
     """One login of an account in a chat. The session id comes from fetch_sid()."""
 
