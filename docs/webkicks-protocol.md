@@ -72,7 +72,11 @@ not known yet.
 
 The name is in `title="…"` and in `fluester('…')`. The visible name can be split into one `<FONT>` per letter
 (colour gradient via `/col`), so it must not be parsed. Guests: `title="name (Gast)"`, `<login name />` without
-the suffix.
+the suffix. Only logins and messages show the suffix: logouts and whispers of guests look like those of
+registered users.
+
+`wkqb.events.parse_line()` turns the lines into events; `tests/fixtures/lines-*.jsonl` holds recorded lines with
+the expected events.
 
 ### Lines (simplified; `T` = `<FONT SIZE=-2>(14:02)</FONT>`, `N` = the styled name)
 
