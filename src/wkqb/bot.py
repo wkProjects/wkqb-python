@@ -13,10 +13,11 @@ nobody can send HTML through the bot, whatever rights it has in the chat.
 import asyncio
 import html
 import logging
+import math
 import random
 import re
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import IntEnum
 
@@ -31,11 +32,15 @@ logger = logging.getLogger(__name__)
 
 
 Reload = Callable[[], Awaitable[tuple[Config, list[str]]]]
+#: Changes the ignore list: (action "add" or "remove", name) -> the new list; raises ConfigError
+ChangeIgnored = Callable[[str, str], Awaitable[Sequence[str]]]
 
 #: Who comes back within this time gets the "welcome back" greeting
 WELCOME_BACK = timedelta(minutes=30)
 #: Greetings wait a little, so the newcomer's chat window is ready
 GREETING_DELAY = timedelta(seconds=5)
+#: How often users may start these games (mods and up always can)
+COOLDOWNS = {"zeitbombe": timedelta(seconds=60), "quiz": timedelta(minutes=3)}
 
 
 class Level(IntEnum):
@@ -78,12 +83,16 @@ class Bot:
         outbox: Outbox,
         reload: Reload,
         *,
+        change_ignored: ChangeIgnored | None = None,
         rng: random.Random | None = None,
         clock: Callable[[], datetime] = cron.now,
     ) -> None:
         self.name = name
         self.outbox = outbox
         self._reload = reload
+        self._change_ignored = change_ignored
+        self._started: dict[str, datetime] = {}
+        """When the games with a cooldown were last started"""
         self._rng = rng or random.Random()
         self._clock = clock
         self.quit = asyncio.Event()
@@ -185,6 +194,12 @@ class Bot:
         sign = re.escape(self.config.command_sign)
         match = re.match(rf"^{sign}(?P<name>\w+)(?:\s+(?P<param>.*))?$", event.text, re.DOTALL)
         if match is None:
+            quiz = self.games.get("quiz")
+            if isinstance(quiz, Quiz) and isinstance(event, Message):
+                # quiz answers can be sent as normal messages
+                self.say(*quiz.check(event.user, event.text, self._clock().timestamp()))
+                if not quiz.running:
+                    del self.games["quiz"]
             self._patterns(event, level)
             return
         if level == Level.GUEST and self.config.guest_mode != GuestMode.FULL:
@@ -264,6 +279,7 @@ class Bot:
         self.reply(command, f"{html.escape(command.user)}, dein Level ist: {command.level.label}")
 
     async def _quote(self, command: Command) -> None:
+        """!quote / !zitat [NR or TEXT]"""
         quotes = self.config.quotes
         if not quotes:
             self.reply(command, "Ich habe leider keine Zitate :-(")
@@ -276,12 +292,71 @@ class Bot:
             else:
                 self._send_quote(number - 1, command)
         else:
-            search = command.param.casefold()
-            found = [i for i, quote in enumerate(quotes) if search in quote.casefold()]
-            if found:
-                self._send_quote(self._rng.choice(found), command)
-            else:
-                self.reply(command, f"Kein Zitat mit '{html.escape(command.param)}' gefunden :-(")
+            self._search_quote(command)
+
+    async def _search(self, command: Command) -> None:
+        """!suche TEXT"""
+        if not self.config.quotes:
+            self.reply(command, "Ich habe leider keine Zitate :-(")
+        elif not command.param:
+            self.reply(command, f"Wonach soll ich suchen? {html.escape(self.config.command_sign)}suche TEXT")
+        else:
+            self._search_quote(command)
+
+    def _search_quote(self, command: Command) -> None:
+        search = command.param.casefold()
+        found = [i for i, quote in enumerate(self.config.quotes) if search in quote.casefold()]
+        if found:
+            self._send_quote(self._rng.choice(found), command)
+        else:
+            self.reply(command, f"Kein Zitat mit '{html.escape(command.param)}' gefunden :-(")
+
+    async def _bid(self, command: Command) -> None:
+        """!bid, whispered by bot admins: the bot's id, which lets others manage it at wkqb.de"""
+        if command.level < Level.ADMIN:
+            return
+        if not command.whispered:
+            self.reply(command, "Das musst du mir flüstern!")
+        elif self.config.bot_id:
+            self.reply(command, f"Meine ID ist {html.escape(self.config.bot_id)}")
+        else:
+            self.reply(command, "Ich kenne meine ID leider nicht :-(")
+
+    async def _ignore(self, command: Command) -> None:
+        await self._change_ignore_list(command, add=True)
+
+    async def _unignore(self, command: Command) -> None:
+        await self._change_ignore_list(command, add=False)
+
+    async def _change_ignore_list(self, command: Command, add: bool) -> None:
+        """!ignore / !unignore NAME, for bot mods and up; the list is kept by wkqb-web."""
+        if command.level < Level.MOD:
+            return
+        name = command.param.split()[0] if command.param else ""
+        shown = html.escape(name)
+        ignored = any(n.casefold() == name.casefold() for n in self.config.ignored)
+        if not name:
+            sign = html.escape(self.config.command_sign)
+            self.reply(command, f"Wen denn? {sign}{'ignore' if add else 'unignore'} NAME")
+        elif add and self._is_me(name):
+            self.reply(command, "Mich selbst ignorieren? Nein danke.")
+        elif add and self.level(name) >= Level.MOD:
+            self.reply(command, f"{shown} gehört zum Bot-Team und kann nicht ignoriert werden.")
+        elif add and ignored:
+            self.reply(command, f"{shown} wird bereits ignoriert.")
+        elif not add and not ignored:
+            self.reply(command, f"{shown} wird gar nicht ignoriert.")
+        elif self._change_ignored is None:
+            self.reply(command, "Die Ignorier-Liste kann ich leider nicht ändern :-(")
+        else:
+            try:
+                names = await self._change_ignored("add" if add else "remove", name)
+            except ConfigError as e:
+                logger.warning("Ignorier-Liste nicht geändert: %s", e)
+                self.reply(command, "Das hat leider nicht geklappt :-(")
+                return
+            self.config = replace(self.config, ignored=list(names))
+            self.reply(command, f"{shown} wird ab sofort ignoriert." if add else f"{shown} wird nicht mehr ignoriert.")
 
     # -- games (always in public)
 
@@ -328,7 +403,7 @@ class Bot:
             if not command.param.isdigit() or not 1 <= int(command.param) <= len(quizzes):
                 self.say(f"{html.escape(command.param)} ist keine gültige ID.")
                 return
-            if not self._may_start_games(command):
+            if not self._may_start_games(command) or not self._cooled_down(command, "quiz", "Das nächste Quiz"):
                 return
             game = self.games["quiz"] = Quiz(
                 quizzes[int(command.param) - 1], self.config.quiz_show_solution, now, self._rng
@@ -342,14 +417,29 @@ class Bot:
             self.say("Es läuft bereits ein Spiel!")
             return
         victim = command.param.split()[0] if command.param else command.user
+        if victim.casefold() != command.user.casefold() and command.level < Level.ADMIN:
+            self.reply(command, "Nur Bot-Admins können anderen eine Bombe zuschieben.")
+            return
         if self.level(victim) == Level.IGNORED:
             self.say("Mit ignorierten Usern spiele ich nicht!")
             return
-        if not self._may_start_games(command):
+        if not self._may_start_games(command) or not self._cooled_down(command, "zeitbombe", "Die nächste Bombe"):
             return
         game = Timebomb(command.user, victim, self._clock().timestamp(), self._rng, sign=self.config.command_sign)
         self.games["zeitbombe"] = game
         self.say(*game.start())
+
+    async def _cheat(self, command: Command) -> None:
+        game = self.games.get("zeitbombe")
+        if not isinstance(game, Timebomb):
+            self.reply(command, "Es läuft doch gar kein Spiel!")
+            return
+        if command.user.casefold() != game.victim.casefold():
+            self.reply(command, *game.cheat(command.user))
+            return
+        # in public, even if whispered: everybody shall see it
+        self.say(*game.cheat(command.user))
+        del self.games["zeitbombe"]
 
     async def _cut(self, command: Command) -> None:
         game = self.games.get("zeitbombe")
@@ -380,6 +470,17 @@ class Bot:
         self.say(*game.throw(command.user, self._clock().timestamp()))
         if not game.running:
             del self.games["kartoffel"]
+
+    def _cooled_down(self, command: Command, game: str, what: str) -> bool:
+        """Users may only start some games now and then; mods and up always can. Counts the start."""
+        now = self._clock()
+        last = self._started.get(game)
+        if command.level < Level.MOD and last is not None and now - last < COOLDOWNS[game]:
+            seconds = math.ceil((last + COOLDOWNS[game] - now).total_seconds())
+            self.reply(command, f"{what} gibt es erst in {seconds} Sekunden.")
+            return False
+        self._started[game] = now
+        return True
 
     def _may_start_games(self, command: Command) -> bool:
         if command.level >= self.config.can_start_games:
@@ -485,6 +586,12 @@ _SYSTEM_COMMANDS: dict[str, Callable[[Bot, Command], Awaitable[None]]] = {
     "ignored": Bot._ignored,
     "level": Bot._level,
     "quote": Bot._quote,
+    "zitat": Bot._quote,
+    "suche": Bot._search,
+    "bid": Bot._bid,
+    "ignore": Bot._ignore,
+    "unignore": Bot._unignore,
+    "cheat": Bot._cheat,
     "hangman": Bot._hangman,
     "wordmix": Bot._wordmix,
     "quiz": Bot._quiz,

@@ -207,3 +207,18 @@ async def test_scheduled_messages_wait_for_the_session(
         await chat_started(fake)
         await until(lambda: len(fake.messages) == 2)
     assert fake.messages == ["vorher", "Bin da! (wkQB 6.0, https://wkqb.de)"]
+
+
+async def test_ignore_goes_to_the_web_interface(
+    fake: FakeWebkicks, server: TestServer, runner_factory: Callable[..., Runner]
+) -> None:
+    fake.config = {**CONFIG, "api": {"ignored": str(server.make_url("/api/ignored.php?b_id=abcdef1234"))}}
+    async with running(runner_factory()):
+        await chat_started(fake)
+        fake.push(message("Bert", "!ignore Dora"))
+        await until(lambda: fake.messages[-1:] == ["Dora wird ab sofort ignoriert."])
+        fake.push(message("Dora", "!ping") + message("Bert", "!reload") + message("Dora", "!ping"))
+        await until(lambda: fake.messages[-1:] == ["Einstellungen neu geladen!"])
+        await asyncio.sleep(0.1)
+    assert fake.config["users"]["ignored"] == ["Dora"]
+    assert "Pong!" not in fake.messages  # ignored, also after the reload

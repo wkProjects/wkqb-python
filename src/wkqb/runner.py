@@ -84,7 +84,9 @@ class Runner:
         config = await self._first_config(stop)
         if config is None:
             return 0
-        bot = self.bot = Bot(self._credentials.username, config, self.outbox, self._load_config)
+        bot = self.bot = Bot(
+            self._credentials.username, config, self.outbox, self._load_config, change_ignored=self._change_ignored
+        )
         ticker = asyncio.create_task(self._ticker(bot))
         try:
             return await self._sessions(bot, stop)
@@ -207,6 +209,12 @@ class Runner:
             if await _wait(stop, delay):
                 return None
             delay = min(delay * 2, self._retry_max)
+
+    async def _change_ignored(self, action: str, name: str) -> list[str]:
+        url = self.bot.config.ignored_api if self.bot is not None else None
+        if url is None:
+            raise ConfigError("wkqb-web gave no address for the ignore list")
+        return await settings.change_ignored(self._http, url, action, name)
 
     async def _load_config(self) -> tuple[Config, list[str]]:
         config, warnings = await settings.load(self._http, self._env)

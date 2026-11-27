@@ -270,7 +270,8 @@ async def test_other_events(caplog: pytest.LogCaptureFixture) -> None:
 
 
 def configured(**data: object) -> Config:
-    config, warnings = parse({"users": {"master": "Anna", "admins": ["Bert"], "ignored": ["Spam"]}, **data})
+    users = {"master": "Anna", "admins": ["Bert"], "mods": ["Cem"], "ignored": ["Spam"]}
+    config, warnings = parse({"users": users, **data})
     assert warnings == []
     return config
 
@@ -480,7 +481,7 @@ async def test_game_timeouts() -> None:
         "Die richtige Lösung war: Katze",
     ]
     assert list(bot.games) == ["wordmix"]
-    clock.now += timedelta(seconds=60)
+    clock.now += timedelta(seconds=240)
     bot.tick()
     assert said(bot)[0] == "Die Zeit für Wordmix ist abgelaufen!"
     assert bot.games == {}
@@ -539,15 +540,20 @@ async def test_no_quiz() -> None:
 async def test_timebomb() -> None:
     bot, clock, _ = make(configured())
     await bot.handle(msg("Emil", "!schneide rot"))
-    await bot.handle(msg("Emil", "!zeitbombe spam"))
-    assert said(bot) == ["Es läuft doch gar kein Spiel!", "Mit ignorierten Usern spiele ich nicht!"]
+    await bot.handle(msg("Emil", "!zeitbombe Dora"))  # only bot admins bomb others
+    await bot.handle(msg("Bert", "!zeitbombe spam"))
+    assert said(bot) == [
+        "Es läuft doch gar kein Spiel!",
+        "Nur Bot-Admins können anderen eine Bombe zuschieben.",
+        "Mit ignorierten Usern spiele ich nicht!",
+    ]
 
-    await bot.handle(msg("Emil", "!zeitbombe Dora bitte"))
-    start = said(bot)
-    assert start[0].startswith("Emil schiebt Dora eine Bombe zu!")
-    await bot.handle(msg("Dora", "!zeitbombe Emil"))
+    await bot.handle(msg("Bert", "!zeitbombe Dora bitte"))
+    assert said(bot)[0].startswith("Bert schiebt Dora eine Bombe zu!")
+    await bot.handle(msg("Dora", "!zeitbombe"))
     await bot.handle(msg("Emil", "!schneide rot"))
-    assert said(bot) == ["Es läuft bereits ein Spiel!", "Du bist doch gar nicht dran!"]
+    await bot.handle(msg("Emil", "!cheat"))
+    assert said(bot) == ["Es läuft bereits ein Spiel!", "Du bist doch gar nicht dran!", "Du hast doch gar keine Bombe!"]
 
     game = bot.games["zeitbombe"]
     assert isinstance(game, Timebomb)
@@ -555,11 +561,122 @@ async def test_timebomb() -> None:
     assert said(bot) == ["Dora hat die Bombe entschärft. Glückwunsch!"]
     assert bot.games == {}
 
-    await bot.handle(msg("Emil", "!zeitbombe <i>x</i>"))
-    assert said(bot)[0].startswith("Emil schiebt &lt;i&gt;x&lt;/i&gt; eine Bombe zu!")
+    await bot.handle(msg("Bert", "!zeitbombe <i>x</i>"))
+    assert said(bot)[0].startswith("Bert schiebt &lt;i&gt;x&lt;/i&gt; eine Bombe zu!")
     clock.now += timedelta(seconds=30)
     bot.tick()
     assert said(bot) == ["&lt;i&gt;x&lt;/i&gt; hat es nicht rechtzeitig geschafft, die Bombe zu entschärfen :-("]
+
+
+async def test_cheating_loses() -> None:
+    bot, _, _ = make(configured())
+    await bot.handle(msg("Bert", "!zeitbombe Dora"))
+    said(bot)
+    await bot.handle(Whisper("Dora", False, "12:34", "!cheat"))
+    assert said(bot) == ["Dora versuchte zu mogeln!"]  # in public
+    assert bot.games == {}
+    await bot.handle(msg("Dora", "!cheat"))
+    assert said(bot) == ["Es läuft doch gar kein Spiel!"]
+
+
+async def test_timebomb_cooldown_for_users() -> None:
+    bot, clock, _ = make(configured())
+    await bot.handle(msg("Emil", "!zeitbombe"))
+    game = bot.games["zeitbombe"]
+    assert isinstance(game, Timebomb)
+    await bot.handle(msg("Emil", f"!schneide {game.wire}"))
+    said(bot)
+    clock.now += timedelta(seconds=20)
+    await bot.handle(msg("Dora", "!zeitbombe"))
+    assert said(bot) == ["Die nächste Bombe gibt es erst in 40 Sekunden."]
+    await bot.handle(msg("Cem", "!zeitbombe"))  # mods aren't held back
+    assert said(bot)[0].startswith("Cem schiebt Cem eine Bombe zu!")
+
+
+async def test_quiz_cooldown_and_plain_answers() -> None:
+    bot, clock, _ = make(configured(**QUIZ))
+    await bot.handle(msg("Emil", "!quiz 1"))
+    said(bot)
+    await bot.handle(msg("Dora", "Ich glaube Mäh"))  # wrong answers as messages: no reaction
+    await bot.handle(Whisper("Dora", False, "12:34", "muh"))  # only public messages count
+    assert said(bot) == []
+    await bot.handle(msg("Dora", " MUH "))
+    assert said(bot)[0].endswith("Dora, Muh ist korrekt!")
+    assert bot.games == {}
+    clock.now += timedelta(minutes=2)
+    await bot.handle(msg("Emil", "!quiz 1"))
+    assert said(bot) == ["Das nächste Quiz gibt es erst in 60 Sekunden."]
+    await bot.handle(msg("Cem", "!quiz 1"))
+    assert said(bot)[0] == "Starte Quiz: Tiere"
+
+
+async def test_zitat_and_suche() -> None:
+    bot, _, _ = make()
+    for text in ["!zitat 1", "!suche drei", "!suche 2", "!suche"]:
+        await bot.handle(msg("Dora", text))
+    assert said(bot) == [
+        "Spruch: Eins [1/3]",
+        "Spruch: Drei [3/3]",
+        "Kein Zitat mit '2' gefunden :-(",
+        "Wonach soll ich suchen? !suche TEXT",
+    ]
+
+
+async def test_bid() -> None:
+    bot, _, _ = make(configured(bot_id="abcdef1234"))
+    await bot.handle(Whisper("Emil", False, "12:34", "!bid"))  # users get nothing
+    await bot.handle(msg("Bert", "!bid"))
+    await bot.handle(Whisper("Bert", False, "12:34", "!bid"))
+    assert said(bot) == ["Das musst du mir flüstern!", "/f Bert Meine ID ist abcdef1234"]
+
+
+class IgnoreList:
+    def __init__(self, names: list[str]) -> None:
+        self.names = names
+        self.calls: list[tuple[str, str]] = []
+        self.fail = False
+
+    async def __call__(self, action: str, name: str) -> list[str]:
+        self.calls.append((action, name))
+        if self.fail:
+            raise ConfigError("HTTP 500")
+        others = [n for n in self.names if n.casefold() != name.casefold()]
+        self.names = [*others, name] if action == "add" else others
+        return self.names
+
+
+async def test_ignore_and_unignore(caplog: pytest.LogCaptureFixture) -> None:
+    api = IgnoreList(["Spam"])
+    bot = Bot("wkQB", configured(), Outbox(), Reloader(), change_ignored=api, clock=Clock())
+    await bot.handle(msg("Emil", "!ignore Dora"))  # mods and up only
+    for text in ["!ignore", "!ignore wkqb", "!ignore Bert", "!ignore SPAM", "!unignore Dora", "!ignore Dora nervt"]:
+        await bot.handle(msg("Cem", text))
+    assert said(bot) == [
+        "Wen denn? !ignore NAME",
+        "Mich selbst ignorieren? Nein danke.",
+        "Bert gehört zum Bot-Team und kann nicht ignoriert werden.",
+        "SPAM wird bereits ignoriert.",
+        "Dora wird gar nicht ignoriert.",
+        "Dora wird ab sofort ignoriert.",
+    ]
+    assert api.calls == [("add", "Dora")]
+    await bot.handle(msg("Dora", "!ping"))
+    assert said(bot) == []
+
+    await bot.handle(msg("Cem", "!unignore dora"))
+    assert said(bot) == ["dora wird nicht mehr ignoriert."]
+    assert bot.config.ignored == ["Spam"]
+
+    api.fail = True
+    await bot.handle(msg("Cem", "!ignore Emil"))
+    assert said(bot) == ["Das hat leider nicht geklappt :-("]
+    assert "HTTP 500" in caplog.text and bot.config.ignored == ["Spam"]
+
+
+async def test_ignore_without_api() -> None:
+    bot, _, _ = make(configured())
+    await bot.handle(msg("Cem", "!ignore Dora"))
+    assert said(bot) == ["Die Ignorier-Liste kann ich leider nicht ändern :-("]
 
 
 async def test_command_sign() -> None:
@@ -572,7 +689,7 @@ async def test_command_sign() -> None:
 
 async def test_only_some_may_start_games() -> None:
     bot, _, _ = make(configured(can_start_games=2, **WORDS, **QUIZ))
-    for text in ["!hangman", "!wordmix", "!quiz 1", "!zeitbombe Dora", "!kartoffel"]:
+    for text in ["!hangman", "!wordmix", "!quiz 1", "!zeitbombe", "!kartoffel"]:
         await bot.handle(msg("Emil", text))
     assert said(bot) == ["Emil, du darfst leider keine Spiele starten."] * 5
     await bot.handle(Whisper("Emil", False, "12:34", "!hangman"))
@@ -617,6 +734,6 @@ async def test_hangman_pictures_and_wordmix_hints_from_the_settings() -> None:
     await bot.handle(msg("Emil", "!wordmix"))
     lines = said(bot)
     assert lines[0].endswith('<img src="https://x/hm0.gif">')
-    clock.now += timedelta(seconds=60)
+    clock.now += timedelta(seconds=150)
     bot.tick()
-    assert "Tipp: Das Wort beginnt mit <b>K</b>." in said(bot)
+    assert "Tipp: <b>k _ _ _ e</b>" in said(bot)

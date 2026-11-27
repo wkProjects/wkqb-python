@@ -215,16 +215,19 @@ def test_hangman_smileys_and_the_last_picture() -> None:
 class TestWordmixHints:
     def test_hints(self) -> None:
         game = Wordmix(["Gemüse"], True, now=0, rng=rng(), hints=True)
-        assert game.tick(59) == []
-        assert game.tick(60) == ["Tipp: Das Wort beginnt mit <b>G</b>."]
-        assert game.tick(61) == []
-        assert game.tick(90) == ["Tipp: Das Wort beginnt mit <b>G</b> und endet mit <b>e</b>."]
-        assert game.tick(100) == []
+        assert "<b>5 Minuten</b>" in game.start()[1]
+        assert game.tick(149) == []
+        assert game.tick(150) == ["Tipp: <b>g _ _ _ _ e</b>"]
+        assert game.tick(151) == []
+        [second] = game.tick(240)
+        assert second.startswith("Tipp: <b>g ") and second.endswith(" e</b>")
+        assert second.count("_") == 3  # one more letter
+        assert game.tick(250) == []
         assert game.tick(WORDMIX_TIME)[0] == "Die Zeit für Wordmix ist abgelaufen!"
 
     def test_no_hints(self) -> None:
         game = Wordmix(["Gemüse"], True, now=0, rng=rng())
-        assert game.tick(95) == []
+        assert game.tick(245) == []
 
     def test_no_hints_after_the_end(self) -> None:
         game = Wordmix(["Gemüse"], True, now=0, rng=rng(), hints=True)
@@ -294,3 +297,19 @@ class TestHotPotato:
     def test_names_are_escaped(self) -> None:
         game = HotPotato("<b>", now=0, rng=rng())
         assert game.start()[0].startswith("&lt;b&gt; startet Heiße Kartoffel!")
+
+
+def test_quiz_asks_at_most_15_questions_in_random_order() -> None:
+    questions = [Question(f"Frage {i}?", str(i)) for i in range(20)]
+    game = Quiz(QuizSet("Viele", questions), True, now=0, rng=rng())
+    assert len(game.questions) == 15 and len(set(game.questions)) == 15
+    assert game.questions != questions[:15]
+    assert quiz_menu([QuizSet("Viele", questions)])[0] == "Ich habe folgende Quizze anzubieten: 1: Viele (15 Fragen)"
+    assert game.deadline == QUIZ_QUESTION_TIME == 30
+
+
+def test_quiz_plain_answers() -> None:
+    game = Quiz(QUIZZES[0], True, now=0, rng=rng())
+    first = game.current
+    assert game.check("anna", "falsch", 1) == []
+    assert game.check("anna", f"  {first.answer.upper()} ", 2)[0].endswith(f"anna, {first.answer} ist korrekt!")

@@ -88,12 +88,29 @@ class FakeWebkicks:
         app.router.add_get(f"/{CID}/tok/{{user}}/{{sid}}/{{millis}}", self._tok)
         app.router.add_post("/cgi-bin/chat.cgi", self._send)
         app.router.add_get("/api/config.php", self._config)
+        app.router.add_post("/api/ignored.php", self._ignored)
         return app
 
     @property
     def messages(self) -> list[str]:
         """The texts sent to the chat"""
         return [message for _, message in self.sent]
+
+    async def _ignored(self, request: web.Request) -> web.Response:
+        """wkqb-web's ignore list: add=NAME or remove=NAME, answers with the new list"""
+        form = await request.post()
+        if failure := self._failure("ignored"):
+            return failure
+        users = self.config.setdefault("users", {})
+        names = [
+            n
+            for n in users.get("ignored", [])
+            if n.casefold() != str(form.get("add", form.get("remove", ""))).casefold()
+        ]
+        if "add" in form:
+            names.append(str(form["add"]))
+        users["ignored"] = names
+        return web.json_response({"ignored": names})
 
     async def _config(self, request: web.Request) -> web.Response:
         if failure := self._failure("config"):

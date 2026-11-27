@@ -81,6 +81,9 @@ class WordGame:
 
 @dataclass(frozen=True, slots=True)
 class Config:
+    bot_id: str = ""
+    ignored_api: str | None = None
+    """Where !ignore and !unignore change the ignore list (wkqb-web: POST with add= or remove=)"""
     guest_mode: GuestMode = GuestMode.IGNORE
     command_sign: str = "!"
     can_start_games: int = 0
@@ -203,6 +206,8 @@ def parse(data: Any) -> tuple[Config, list[str]]:
             warnings.append("Hangman: ungültige Bild-Vorlage, es wird nur Text ausgegeben.")
 
     config = Config(
+        bot_id=_str(data.get("bot_id")).strip(),
+        ignored_api=_str(_dict(data.get("api")).get("ignored")).strip() or None,
         guest_mode=guest_mode,
         jointext=_str(data.get("jointext")),
         quote_cron=quote_cron,
@@ -246,6 +251,25 @@ async def load(session: aiohttp.ClientSession, env: Mapping[str, str]) -> tuple[
         raise
     except (OSError, aiohttp.ClientError, TimeoutError, ValueError) as e:
         raise ConfigError(f"{type(e).__name__}: {e}") from e
+
+
+async def change_ignored(session: aiohttp.ClientSession, url: str, action: str, name: str) -> list[str]:
+    """Adds (action "add") or removes ("remove") a name on the ignore list; the new list."""
+    try:
+        async with session.post(
+            url, data={action: name}, timeout=aiohttp.ClientTimeout(total=LOAD_TIMEOUT)
+        ) as response:
+            if response.status != 200:
+                raise ConfigError(f"HTTP {response.status}")
+            answer = await response.json(content_type=None)
+    except ConfigError:
+        raise
+    except (aiohttp.ClientError, TimeoutError, ValueError) as e:
+        raise ConfigError(f"{type(e).__name__}: {e}") from e
+    names = answer.get("ignored") if isinstance(answer, dict) else None
+    if not isinstance(names, list):
+        raise ConfigError("the answer has no ignore list")
+    return _names(names)
 
 
 def _word_game(value: Any) -> WordGame:

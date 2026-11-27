@@ -15,6 +15,7 @@ from wkqb.config import (
     GuestMode,
     WhisperMode,
     WordGame,
+    change_ignored,
     load,
     parse,
 )
@@ -205,3 +206,22 @@ def test_defaults_of_game_settings() -> None:
     assert (config.command_sign, config.can_start_games, config.hangman.picture) == ("!", 4, None)
     assert config.ki_whisper  # as before
     assert warnings == ["Hangman: ungültige Bild-Vorlage, es wird nur Text ausgegeben."]
+
+
+def test_bot_id_and_api() -> None:
+    config, _ = parse({"bot_id": "abcdef1234", "api": {"ignored": "https://wkqb.de/api/ignored.php?b_id=abcdef1234"}})
+    assert config.bot_id == "abcdef1234"
+    assert config.ignored_api == "https://wkqb.de/api/ignored.php?b_id=abcdef1234"
+    assert parse({"api": {"ignored": None}})[0].ignored_api is None
+
+
+async def test_change_ignored(fake: FakeWebkicks, server: TestServer, session: aiohttp.ClientSession) -> None:
+    fake.config = {"users": {"ignored": ["Spam"]}}
+    url = str(server.make_url("/api/ignored.php?b_id=abcdef1234"))
+    assert await change_ignored(session, url, "add", "Dora") == ["Spam", "Dora"]
+    assert await change_ignored(session, url, "remove", "spam") == ["Dora"]
+    fake.fail["ignored"] = 500
+    with pytest.raises(ConfigError, match="HTTP 500"):
+        await change_ignored(session, url, "add", "x")
+    with pytest.raises(ConfigError, match="ClientConnectorError"):
+        await change_ignored(session, "http://127.0.0.1:1/x", "add", "x")

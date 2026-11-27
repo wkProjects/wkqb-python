@@ -18,11 +18,14 @@ HANGMAN_TIMEOUT = 60.0
 HANGMAN_TRIES = 10
 #: A wrong solution costs this many tries
 HANGMAN_WRONG_SOLUTION = 3
-WORDMIX_TIME = 120.0
-#: Seconds after the start for the hints (first letter, then also the last one)
-WORDMIX_HINTS = (60.0, 90.0)
+#: As documented: 5 minutes, as the game can be hard
+WORDMIX_TIME = 300.0
+#: Seconds after the start for the hints: first and last letter, then one more
+WORDMIX_HINTS = (150.0, 240.0)
 TIMEBOMB_MIN, TIMEBOMB_MAX = 15, 30
-QUIZ_QUESTION_TIME = 20.0
+QUIZ_QUESTION_TIME = 30.0
+#: Questions of a quiz are asked in random order, at most this many
+QUIZ_MAX_QUESTIONS = 15
 POTATO_SIGNUP = 60.0
 POTATO_MIN_PLAYERS = 3
 #: Seconds to throw the potato back: 10 as in the rules, plus the bot's sending delay
@@ -180,6 +183,10 @@ class Wordmix(Game):
         self.sign = sign
         self.hint_times = [now + after for after in WORDMIX_HINTS] if hints else []
         letters = self.word.lower()
+        # the hints show the first and the last letter, then one more in between
+        self.hinted = {0, len(letters) - 1}
+        middle = list(range(1, len(letters) - 1))
+        self.second_hint = rng.choice(middle) if middle else None
         shuffled = letters
         # a short word could come out unchanged
         for _ in range(10):
@@ -192,7 +199,7 @@ class Wordmix(Game):
     def start(self) -> list[str]:
         return [
             f"Wordmix gestartet! Gesucht: <b>{self.shuffled}</b>",
-            f"Ratet die Lösung mit <b>{_e(self.sign)}wordmix LÖSUNG</b>. Ihr habt <b>2 Minuten</b> Zeit. Viel Erfolg!",
+            f"Ratet die Lösung mit <b>{_e(self.sign)}wordmix LÖSUNG</b>. Ihr habt <b>5 Minuten</b> Zeit. Viel Erfolg!",
         ]
 
     def guess(self, user: str, text: str, now: float) -> list[str]:
@@ -208,12 +215,14 @@ class Wordmix(Game):
         answer = super().tick(now)
         if self.running and self.hint_times and now >= self.hint_times[0]:
             self.hint_times.pop(0)
-            first, last = self.word[0].upper(), self.word[-1].lower()
-            if self.hint_times:
-                answer.append(f"Tipp: Das Wort beginnt mit <b>{first}</b>.")
-            else:
-                answer.append(f"Tipp: Das Wort beginnt mit <b>{first}</b> und endet mit <b>{last}</b>.")
+            if not self.hint_times and self.second_hint is not None:
+                self.hinted.add(self.second_hint)
+            answer.append(f"Tipp: <b>{self.hint()}</b>")
         return answer
+
+    def hint(self) -> str:
+        """The word with the hinted letters, e.g. "k _ _ _ e"."""
+        return " ".join(ch if i in self.hinted else "_" for i, ch in enumerate(self.word.lower()))
 
     def timeout(self, now: float) -> list[str]:
         self.running = False
@@ -253,6 +262,13 @@ class Timebomb(Game):
             return [f"{_e(self.victim)} hat die Bombe entschärft. Glückwunsch!"]
         return ["Das war leider das falsche Kabel!"]
 
+    def cheat(self, user: str) -> list[str]:
+        """!cheat: a trap. The docs promise the right wire, but whoever has the bomb loses."""
+        if not _same(user, self.victim):
+            return ["Du hast doch gar keine Bombe!"]
+        self.running = False
+        return [f"{_e(self.victim)} versuchte zu mogeln!"]
+
     def timeout(self, now: float) -> list[str]:
         self.running = False
         return [f"{_e(self.victim)} hat es nicht rechtzeitig geschafft, die Bombe zu entschärfen :-("]
@@ -275,7 +291,9 @@ def quiz_menu(quizzes: Sequence[QuizSet], sign: str = "!") -> list[str]:
     if not quizzes:
         return ["Ich kenne leider kein Quiz :-("]
     # one line for all: every line costs 2.5 s (flood protection)
-    entries = ", ".join(f"{i}: {quiz.name} ({len(quiz.questions)} Fragen)" for i, quiz in enumerate(quizzes, 1))
+    entries = ", ".join(
+        f"{i}: {quiz.name} ({min(len(quiz.questions), QUIZ_MAX_QUESTIONS)} Fragen)" for i, quiz in enumerate(quizzes, 1)
+    )
     return [
         f"Ich habe folgende Quizze anzubieten: {entries}",
         f"Sende {_e(sign)}quiz ID, um das gewünschte Quiz zu starten!",
@@ -285,6 +303,7 @@ def quiz_menu(quizzes: Sequence[QuizSet], sign: str = "!") -> list[str]:
 class Quiz(Game):
     def __init__(self, quiz: QuizSet, show_solution: bool, now: float, rng: random.Random) -> None:
         self.quiz = quiz
+        self.questions = rng.sample(list(quiz.questions), min(len(quiz.questions), QUIZ_MAX_QUESTIONS))
         self.show_solution = show_solution
         self.rng = rng
         self.index = 0
@@ -292,7 +311,7 @@ class Quiz(Game):
 
     @property
     def current(self) -> Question:
-        return self.quiz.questions[self.index]
+        return self.questions[self.index]
 
     def start(self) -> list[str]:
         return [f"Starte Quiz: {self.quiz.name}", self.current.question]
@@ -303,6 +322,13 @@ class Quiz(Game):
             return [self.current.question]
         if not _same(answer, self.current.answer):
             return [f"{_e(answer)} ist leider falsch!"]
+        return self._correct(user, now)
+
+    def check(self, user: str, text: str, now: float) -> list[str]:
+        """An answer sent as a normal chat message: only right ones get a reaction."""
+        return self._correct(user, now) if _same(text, self.current.answer) else []
+
+    def _correct(self, user: str, now: float) -> list[str]:
         praise = self.rng.choice(["Super", "Toll", "Sehr gut"])
         return [f"{praise} {_e(user)}, {self.current.answer} ist korrekt!", *self._next(now)]
 
@@ -314,7 +340,7 @@ class Quiz(Game):
 
     def _next(self, now: float) -> list[str]:
         self.index += 1
-        if self.index >= len(self.quiz.questions):
+        if self.index >= len(self.questions):
             self.running = False
             return ["Das waren alle Fragen, das Quiz ist daher beendet!"]
         self.deadline = now + QUIZ_QUESTION_TIME
