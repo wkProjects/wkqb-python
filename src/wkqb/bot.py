@@ -1,4 +1,4 @@
-"""What the bot does with the chat events: commands, scheduled messages, greetings.
+"""What the bot does with the chat events: commands, games, greetings, KI, scheduled messages.
 
 The Bot does no I/O itself: answers go into the outbox, settings come through the reload callback,
 and the runner (wkqb.runner) feeds it the events and calls tick() every second.
@@ -11,12 +11,13 @@ import random
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import IntEnum
 
 from wkqb import VERSION, cron
-from wkqb.config import Config, ConfigError, GuestMode
+from wkqb.config import Config, ConfigError, GuestMode, Pattern, WhisperMode
 from wkqb.events import Event, FloodWarning, Login, Logout, Message, RoomLeave, SystemMessage, Unparsed, Whisper
+from wkqb.games import Game, Hangman, Quiz, Timebomb, Wordmix, quiz_menu
 from wkqb.outbox import Outbox
 from wkqb.tokens import render
 
@@ -25,6 +26,11 @@ logger = logging.getLogger(__name__)
 _COMMAND = re.compile(r"^!(?P<name>\w+)(?:\s+(?P<param>.*))?$", re.DOTALL)
 
 Reload = Callable[[], Awaitable[tuple[Config, list[str]]]]
+
+#: Who comes back within this time gets the "welcome back" greeting
+WELCOME_BACK = timedelta(minutes=30)
+#: Greetings wait a little, so the newcomer's chat window is ready
+GREETING_DELAY = timedelta(seconds=5)
 
 
 class Level(IntEnum):
@@ -78,6 +84,11 @@ class Bot:
         self.quit = asyncio.Event()
         """Set by !quit: the runner sends the rest of the outbox, logs out and ends"""
         self._guests: set[str] = set()
+        self._seen: dict[str, datetime] = {}
+        """When users (lower case) logged in or out last"""
+        self._greetings: list[tuple[datetime, str]] = []
+        self.games: dict[str, Game] = {}
+        """Running games by command (hangman, wordmix, quiz, zeitbombe)"""
         self._greeted_once = False
         self.config = config
         self._quote_schedule: cron.Schedule | None = None
@@ -98,8 +109,15 @@ class Bot:
             self.say(f"{self.config.jointext} (wkQB {VERSION}, https://wkqb.de)".strip())
 
     def tick(self) -> None:
-        """Called about once a second: scheduled messages."""
+        """Called about once a second: scheduled messages, greetings, game timeouts."""
         now = self._clock()
+        due = [text for at, text in self._greetings if at <= now]
+        self._greetings = [(at, text) for at, text in self._greetings if at > now]
+        self.say(*due)
+        for name, game in list(self.games.items()):
+            self.say(*game.tick(now.timestamp()))
+            if not game.running:
+                del self.games[name]
         if self._quote_schedule is not None and self._quote_schedule.due(now):
             self._send_quote(self._rng.randrange(len(self.config.quotes)))
         for schedule, message in self._calendar:
@@ -113,7 +131,11 @@ class Bot:
             case Login(user=user, guest=guest):
                 if guest:
                     self._guests.add(user.casefold())
-            case Logout(user=user) | RoomLeave(user=user):
+                self._greet(user, guest)
+            case Logout(user=user):
+                self._guests.discard(user.casefold())
+                self._seen[user.casefold()] = self._clock()
+            case RoomLeave(user=user):
                 self._guests.discard(user.casefold())
             case FloodWarning(user=user, number=number) if self._is_me(user):
                 logger.warning("Webkicks hat den Bot wegen Flooding verwarnt (%d. Verwarnung)", number)
@@ -157,6 +179,7 @@ class Bot:
             return
         match = _COMMAND.match(event.text)
         if match is None:
+            self._patterns(event, level)
             return
         if level == Level.GUEST and self.config.guest_mode != GuestMode.FULL:
             return
@@ -172,10 +195,20 @@ class Bot:
 
     async def command(self, command: Command) -> None:
         handler = _SYSTEM_COMMANDS.get(command.name)
-        if handler is None:
+        if handler is not None:
+            await handler(self, command)
+            return
+        custom = [c for c in self.config.commands if c.command.casefold() == command.name]
+        if not custom:
             self.reply(command, "Den Befehl kenne ich leider nicht :-(")
             return
-        await handler(self, command)
+        for entry in custom:
+            allowed = WhisperMode.WHISPER if command.whispered else WhisperMode.PUBLIC
+            if command.level >= entry.min_level and entry.whisper_mode in (allowed, WhisperMode.BOTH):
+                values = {"user": command.user, "param": command.param, "time": self._time(command.time)}
+                # in public: the reactions can be chat commands like /kick, which must not be whispered
+                self.say(*(render(line, chat_values=values, rng=self._rng) for line in entry.reaction))
+                return
 
     # -- system commands
 
@@ -242,7 +275,110 @@ class Bot:
             else:
                 self.reply(command, f"Kein Zitat mit '{html.escape(command.param)}' gefunden :-(")
 
+    # -- games (always in public)
+
+    async def _hangman(self, command: Command) -> None:
+        await self._word_game(command, "hangman")
+
+    async def _wordmix(self, command: Command) -> None:
+        await self._word_game(command, "wordmix")
+
+    async def _word_game(self, command: Command, name: str) -> None:
+        now = self._clock().timestamp()
+        game = self.games.get(name)
+        if isinstance(game, Hangman | Wordmix):
+            self.say(*game.guess(command.user, command.param, now))
+        else:
+            settings = self.config.hangman if name == "hangman" else self.config.wordmix
+            if not settings.words:
+                self.say("Ich habe leider keine Wörter :-(")
+                return
+            kind = Hangman if name == "hangman" else Wordmix
+            game = self.games[name] = kind(settings.words, settings.show_solution, now, self._rng)
+            self.say(*game.start())
+        if not game.running:
+            del self.games[name]
+
+    async def _quiz(self, command: Command) -> None:
+        now = self._clock().timestamp()
+        game = self.games.get("quiz")
+        if isinstance(game, Quiz):
+            self.say(*game.answer(command.user, command.param, now))
+        else:
+            quizzes = self.config.quizzes
+            if not command.param or not quizzes:
+                self.say(*quiz_menu(quizzes))
+                return
+            if not command.param.isdigit() or not 1 <= int(command.param) <= len(quizzes):
+                self.say(f"{html.escape(command.param)} ist keine gültige ID.")
+                return
+            game = self.games["quiz"] = Quiz(
+                quizzes[int(command.param) - 1], self.config.quiz_show_solution, now, self._rng
+            )
+            self.say(*game.start())
+        if not game.running:
+            del self.games["quiz"]
+
+    async def _timebomb(self, command: Command) -> None:
+        if "zeitbombe" in self.games:
+            self.say("Es läuft bereits ein Spiel!")
+            return
+        victim = command.param.split()[0] if command.param else command.user
+        if self.level(victim) == Level.IGNORED:
+            self.say("Mit ignorierten Usern spiele ich nicht!")
+            return
+        game = Timebomb(command.user, victim, self._clock().timestamp(), self._rng)
+        self.games["zeitbombe"] = game
+        self.say(*game.start())
+
+    async def _cut(self, command: Command) -> None:
+        game = self.games.get("zeitbombe")
+        if not isinstance(game, Timebomb):
+            self.say("Es läuft doch gar kein Spiel!")
+            return
+        self.say(*game.cut(command.user, command.param))
+        if not game.running:
+            del self.games["zeitbombe"]
+
+    # -- greetings and KI
+
+    def _greet(self, user: str, guest: bool) -> None:
+        if self._is_me(user) or self.level(user, guest) == Level.IGNORED:
+            return
+        if guest and self.config.guest_mode == GuestMode.IGNORE:
+            return
+        now = self._clock()
+        name = user.casefold()
+        greeting = self.config.custom_greetings.get(name, self.config.greeting)
+        last = self._seen.get(name)
+        template = greeting.wb if last is not None and now - last <= WELCOME_BACK else greeting.hello
+        self._seen[name] = now
+        if template.strip():
+            text = render(template, chat_values={"user": user}, rng=self._rng)
+            self._greetings.append((now + GREETING_DELAY, text))
+
+    def _patterns(self, event: Message | Whisper, level: Level) -> None:
+        """The KI: reactions to messages that contain a text or match a regex."""
+        guest = level == Level.GUEST
+        for entry in self.config.patterns:
+            if guest and not entry.guest_reaction:
+                continue
+            groups = _match(entry, event.text)
+            if groups is None:
+                continue
+            if entry.needs_bot_name and not _contains_word(event.text, self.name):
+                continue
+            values = {"user": event.user, "satz": event.text, "time": self._time(event.time)}
+            lines = [render(line, chat_values=values, groups=groups, rng=self._rng) for line in entry.reaction]
+            if isinstance(event, Whisper):
+                self.say(*(f"/f {event.user} {line}" for line in lines))
+            else:
+                self.say(*lines)
+
     # -- helpers
+
+    def _time(self, time: str | None) -> str:
+        return time or f"{self._clock():%H:%M}"
 
     def _send_quote(self, index: int, command: Command | None = None) -> None:
         config = self.config
@@ -267,6 +403,28 @@ def _contains(names: Sequence[str], casefolded: str) -> bool:
     return any(n.casefold() == casefolded for n in names)
 
 
+def _contains_word(text: str, word: str) -> bool:
+    """word occurs in text, not as part of a longer word ("Bot" is not in "Botschafter"), any case.
+
+    Only edges that are letters or digits must not continue a word: "?" is found in "was?".
+    """
+    if not word:
+        return False
+    before = r"(?<!\w)" if re.match(r"\w", word[0]) else ""
+    after = r"(?!\w)" if re.match(r"\w", word[-1]) else ""
+    return re.search(before + re.escape(word) + after, text, re.IGNORECASE) is not None
+
+
+def _match(entry: Pattern, text: str) -> dict[int, str] | None:
+    """The groups ($0 is the whole match) if the entry matches text, else None."""
+    if entry.regex is None:
+        return {0: entry.pattern} if _contains_word(text, entry.pattern) else None
+    found = entry.regex.search(text)
+    if found is None:
+        return None
+    return {0: found.group(0)} | {i: g for i, g in enumerate(found.groups(), 1) if g is not None}
+
+
 _SYSTEM_COMMANDS: dict[str, Callable[[Bot, Command], Awaitable[None]]] = {
     "ping": Bot._ping,
     "say": Bot._say,
@@ -278,4 +436,9 @@ _SYSTEM_COMMANDS: dict[str, Callable[[Bot, Command], Awaitable[None]]] = {
     "ignored": Bot._ignored,
     "level": Bot._level,
     "quote": Bot._quote,
+    "hangman": Bot._hangman,
+    "wordmix": Bot._wordmix,
+    "quiz": Bot._quiz,
+    "zeitbombe": Bot._timebomb,
+    "schneide": Bot._cut,
 }

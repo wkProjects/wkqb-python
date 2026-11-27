@@ -6,9 +6,10 @@ from datetime import datetime, timedelta
 import pytest
 
 from wkqb.bot import Bot, Level
-from wkqb.config import CalendarEntry, Config, ConfigError, GuestMode
+from wkqb.config import CalendarEntry, Config, ConfigError, GuestMode, parse
 from wkqb.cron import TIMEZONE
-from wkqb.events import FloodWarning, Login, Logout, Message, SystemMessage, Unparsed, Whisper
+from wkqb.events import FloodWarning, Login, Logout, Message, RoomEnter, SystemMessage, Unparsed, Whisper
+from wkqb.games import Timebomb
 from wkqb.outbox import Outbox
 
 CONFIG = Config(
@@ -261,3 +262,292 @@ async def test_other_events(caplog: pytest.LogCaptureFixture) -> None:
     assert said(bot) == []
     assert "2. Verwarnung" in caplog.text and "1. Verwarnung" not in caplog.text
     assert "System-Meldung: Wartung" in caplog.text and "<blink>" in caplog.text
+
+
+# -- features
+
+
+def configured(**data: object) -> Config:
+    config, warnings = parse({"users": {"master": "Anna", "admins": ["Bert"], "ignored": ["Spam"]}, **data})
+    assert warnings == []
+    return config
+
+
+GREETINGS = {
+    "greeting": {"hello": "Hallo %USER%!", "wb": "wb %USER%!", "custom": {"Dora": {"hello": "Hi Dora!", "wb": ""}}},
+}
+
+
+async def test_greetings_wait_a_little() -> None:
+    bot, clock, _ = make(configured(**GREETINGS))
+    await bot.handle(Login("Emil", False, "12:34"))
+    bot.tick()
+    assert said(bot) == []
+    clock.now += timedelta(seconds=5)
+    bot.tick()
+    assert said(bot) == ["Hallo Emil!"]
+
+
+async def test_welcome_back() -> None:
+    bot, clock, _ = make(configured(**GREETINGS))
+    await bot.handle(Login("Emil", False, "12:34"))
+    await bot.handle(Logout("Emil", False, "12:35", False))
+    clock.now += timedelta(minutes=29)
+    await bot.handle(Login("emil", False, "13:04"))
+    await bot.handle(Logout("Emil", False, "13:05", False))
+    clock.now += timedelta(minutes=31)
+    await bot.handle(Login("Emil", False, "13:36"))
+    clock.now += timedelta(seconds=5)
+    bot.tick()
+    assert said(bot) == ["Hallo Emil!", "wb emil!", "Hallo Emil!"]
+
+
+async def test_custom_greetings() -> None:
+    bot, clock, _ = make(configured(**GREETINGS))
+    await bot.handle(Login("DORA", False, "12:34"))
+    await bot.handle(Logout("Dora", False, "12:35", False))
+    await bot.handle(Login("Dora", False, "12:36"))  # "wb" is empty: the exporter fills in the default
+    clock.now += timedelta(seconds=5)
+    bot.tick()
+    assert said(bot) == ["Hi Dora!", "wb Dora!"]
+
+
+@pytest.mark.parametrize(("mode", "greeted"), [(0, False), (1, True), (2, True)])
+async def test_guest_greetings(mode: int, greeted: bool) -> None:
+    bot, clock, _ = make(configured(guest_mode=mode, **GREETINGS))
+    await bot.handle(Login("gast", True, "12:34"))
+    clock.now += timedelta(seconds=5)
+    bot.tick()
+    assert said(bot) == (["Hallo gast!"] if greeted else [])
+
+
+async def test_no_greetings_for_itself_and_ignored_users() -> None:
+    bot, clock, _ = make(configured(**GREETINGS))
+    await bot.handle(Login("wkQB", False, "12:34"))
+    await bot.handle(Login("Spam", False, "12:34"))
+    await bot.handle(RoomEnter("Emil", False, "12:34", "Smalltalk"))  # as the old bot: no greeting
+    clock.now += timedelta(seconds=5)
+    bot.tick()
+    assert said(bot) == []
+
+
+COMMANDS = {
+    "commands": {
+        "list": [
+            {
+                "command": "Hallo",
+                "reaction": ["Hallo %PARAM%, sagt %USER% um %TIME%"],
+                "whisper_mode": 0,
+                "min_level": 1,
+            },
+            {"command": "geheim", "reaction": ["/kick %PARAM%"], "whisper_mode": 1, "min_level": 3},
+            {"command": "beides", "reaction": ["eins", "zwei"], "whisper_mode": 2, "min_level": 0},
+            {"command": "ping", "reaction": ["nie"], "whisper_mode": 2, "min_level": 0},
+        ]
+    }
+}
+
+
+async def test_custom_commands() -> None:
+    bot, _, _ = make(configured(**COMMANDS))
+    await bot.handle(msg("Emil", "!hallo <b>Welt</b>"))
+    await bot.handle(Whisper("Emil", False, "12:34", "!hallo Welt"))  # not when whispered
+    await bot.handle(msg("Emil", "!beides"))
+    await bot.handle(Whisper("Emil", False, "12:34", "!beides"))
+    await bot.handle(msg("Emil", "!ping"))  # system commands come first
+    assert said(bot) == ["Hallo &lt;b&gt;Welt&lt;/b&gt;, sagt Emil um 12:34", "eins", "zwei", "eins", "zwei", "Pong!"]
+
+
+async def test_custom_command_levels_and_whisper_only() -> None:
+    bot, _, _ = make(configured(**COMMANDS))
+    await bot.handle(msg("Bert", "!geheim Spam"))  # only whispered
+    await bot.handle(Whisper("Emil", False, "12:34", "!geheim Spam"))  # admins only
+    assert said(bot) == []
+    await bot.handle(Whisper("Bert", False, "12:34", "!geheim Spam"))
+    assert said(bot) == ["/kick Spam"]  # in public: a chat command, not a whisper
+
+
+async def test_custom_commands_for_guests() -> None:
+    bot, _, _ = make(configured(guest_mode=2, **COMMANDS))
+    await bot.handle(msg("gast", "!beides", guest=True))
+    await bot.handle(msg("gast", "!hallo", guest=True))  # registered users only
+    assert said(bot) == ["eins", "zwei"]
+
+
+KI = {
+    "pattern": {
+        "list": [
+            {
+                "pattern": "hallo",
+                "type": "plain",
+                "reaction": ["Hi %USER%!"],
+                "needs_bot_name": True,
+                "guest_reaction": False,
+            },
+            {
+                "pattern": "Bot",
+                "type": "plain",
+                "reaction": ["Wer, ich?"],
+                "needs_bot_name": False,
+                "guest_reaction": True,
+            },
+            {
+                "pattern": "?",
+                "type": "plain",
+                "reaction": ["Gute Frage"],
+                "needs_bot_name": False,
+                "guest_reaction": False,
+            },
+            {
+                "pattern": r"(https?://\S+)",
+                "type": "regex",
+                "reaction": ["%USER% hat $1 gepostet: %SATZ%"],
+                "needs_bot_name": False,
+                "guest_reaction": False,
+            },
+        ]
+    }
+}
+
+
+@pytest.mark.parametrize(
+    ("text", "answers"),
+    [
+        ("hallo", []),
+        ("HALLO wkqb", ["Hi Emil!"]),
+        ("wkQB, hallo!", ["Hi Emil!"]),
+        ("hallowkQB", []),
+        ("Hallo wkQBs", []),
+        ("Der Bot ist da", ["Wer, ich?"]),
+        ("Der Botschafter", []),
+        ("was?", ["Gute Frage"]),
+        ("siehe https://x.de/<b>", ["Emil hat https://x.de/&lt;b&gt; gepostet: siehe https://x.de/&lt;b&gt;"]),
+        ("!hallo wkQB", ["Den Befehl kenne ich leider nicht :-("]),  # commands are no KI
+    ],
+)
+async def test_ki(text: str, answers: list[str]) -> None:
+    bot, _, _ = make(configured(**KI))
+    await bot.handle(msg("Emil", text))
+    assert said(bot) == answers
+
+
+async def test_ki_for_guests_ignores_the_guest_mode() -> None:
+    bot, _, _ = make(configured(guest_mode=0, **KI))
+    await bot.handle(msg("gast", "Bot? hallo wkQB", guest=True))
+    assert said(bot) == ["Wer, ich?"]
+
+
+async def test_ki_answers_whispers_by_whisper() -> None:
+    bot, _, _ = make(configured(**KI))
+    await bot.handle(Whisper("Emil", False, "12:34", "hallo wkQB"))
+    assert said(bot) == ["/f Emil Hi Emil!"]
+
+
+WORDS = {"hangman": {"show_solution": True, "words": ["Katze"]}, "wordmix": {"show_solution": True, "words": ["ab"]}}
+
+
+async def test_hangman() -> None:
+    bot, _, _ = make(configured(**WORDS))
+    await bot.handle(msg("Emil", "!hangman"))
+    assert said(bot)[0] == "Hangman gestartet! Gesucht: _ _ _ _ _ (5 Zeichen)"
+    await bot.handle(msg("Emil", "!hangman <b>"))
+    assert said(bot) == ["Emil, &lt;b&gt; war leider nicht die richtige Lösung.", "Verbleibende Versuche: 7"]
+    await bot.handle(Whisper("Dora", False, "12:34", "!hangman katze"))  # games answer in public
+    assert said(bot) == ["Volltreffer Dora, Katze ist richtig!"]
+    assert "hangman" not in bot.games
+    await bot.handle(msg("Emil", "!hangman"))
+    assert said(bot)[0].startswith("Hangman gestartet!")
+
+
+async def test_game_timeouts() -> None:
+    bot, clock, _ = make(configured(**WORDS))
+    await bot.handle(msg("Emil", "!hangman"))
+    await bot.handle(msg("Emil", "!wordmix"))
+    said(bot)
+    clock.now += timedelta(seconds=60)
+    bot.tick()
+    assert said(bot) == [
+        "Das Hangman-Spiel wurde beendet, weil es zu lange ignoriert wurde.",
+        "Die richtige Lösung war: Katze",
+    ]
+    assert list(bot.games) == ["wordmix"]
+    clock.now += timedelta(seconds=60)
+    bot.tick()
+    assert said(bot)[0] == "Die Zeit für Wordmix ist abgelaufen!"
+    assert bot.games == {}
+
+
+async def test_no_words() -> None:
+    bot, _, _ = make(configured())
+    await bot.handle(msg("Emil", "!hangman"))
+    await bot.handle(msg("Emil", "!wordmix"))
+    assert said(bot) == ["Ich habe leider keine Wörter :-(", "Ich habe leider keine Wörter :-("]
+
+
+async def test_wordmix() -> None:
+    bot, _, _ = make(configured(**WORDS))
+    await bot.handle(msg("Emil", "!wordmix"))
+    assert said(bot)[0] == "Wordmix gestartet! Gesucht: <b>ba</b>"
+    await bot.handle(msg("Emil", "!wordmix AB"))
+    assert said(bot) == ["Volltreffer Emil, ab ist richtig!"]
+    assert bot.games == {}
+
+
+QUIZ = {
+    "quiz": {
+        "show_solution": True,
+        "quizzes": [{"name": "Tiere", "questions": [{"question": "Wie macht die Kuh?", "answer": "Muh"}]}],
+    }
+}
+
+
+async def test_quiz() -> None:
+    bot, _, _ = make(configured(**QUIZ))
+    for text in ["!quiz", "!quiz 2", "!quiz <b>"]:
+        await bot.handle(msg("Emil", text))
+    assert said(bot) == [
+        "Ich habe folgende Quizze anzubieten: 1: Tiere (1 Fragen)",
+        "Sende !quiz ID, um das gewünschte Quiz zu starten!",
+        "2 ist keine gültige ID.",
+        "&lt;b&gt; ist keine gültige ID.",
+    ]
+    await bot.handle(msg("Emil", "!quiz 1"))
+    assert said(bot) == ["Starte Quiz: Tiere", "Wie macht die Kuh?"]
+    await bot.handle(msg("Emil", "!quiz mäh"))
+    await bot.handle(msg("Dora", "!quiz muh"))
+    answers = said(bot)
+    assert answers[0] == "mäh ist leider falsch!" and answers[1].endswith("Dora, Muh ist korrekt!")
+    assert answers[2] == "Das waren alle Fragen, das Quiz ist daher beendet!"
+    assert bot.games == {}
+
+
+async def test_no_quiz() -> None:
+    bot, _, _ = make(configured())
+    await bot.handle(msg("Emil", "!quiz 1"))
+    assert said(bot) == ["Ich kenne leider kein Quiz :-("]
+
+
+async def test_timebomb() -> None:
+    bot, clock, _ = make(configured())
+    await bot.handle(msg("Emil", "!schneide rot"))
+    await bot.handle(msg("Emil", "!zeitbombe spam"))
+    assert said(bot) == ["Es läuft doch gar kein Spiel!", "Mit ignorierten Usern spiele ich nicht!"]
+
+    await bot.handle(msg("Emil", "!zeitbombe Dora bitte"))
+    start = said(bot)
+    assert start[0].startswith("Emil schiebt Dora eine Bombe zu!")
+    await bot.handle(msg("Dora", "!zeitbombe Emil"))
+    await bot.handle(msg("Emil", "!schneide rot"))
+    assert said(bot) == ["Es läuft bereits ein Spiel!", "Du bist doch gar nicht dran!"]
+
+    game = bot.games["zeitbombe"]
+    assert isinstance(game, Timebomb)
+    await bot.handle(msg("Dora", f"!schneide {game.wire}"))
+    assert said(bot) == ["Dora hat die Bombe entschärft. Glückwunsch!"]
+    assert bot.games == {}
+
+    await bot.handle(msg("Emil", "!zeitbombe <i>x</i>"))
+    assert said(bot)[0].startswith("Emil schiebt &lt;i&gt;x&lt;/i&gt; eine Bombe zu!")
+    clock.now += timedelta(seconds=30)
+    bot.tick()
+    assert said(bot) == ["&lt;i&gt;x&lt;/i&gt; hat es nicht rechtzeitig geschafft, die Bombe zu entschärfen :-("]

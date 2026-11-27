@@ -3,11 +3,15 @@
 Time is passed in (`now`, in seconds, e.g. time.monotonic()), and the bot calls tick(now) about
 once a second, which ends a game or moves on when its time is up. Randomness comes from an
 injected random.Random. Texts are those of the old bot, except where it misbehaved.
+
+Names and guesses from the chat are HTML-escaped where they are repeated (the bot may be a chat
+admin, whose messages can contain HTML); words, questions and answers from the settings are not.
 """
 
 import random
 from collections.abc import Sequence
 from dataclasses import dataclass
+from html import escape as _e
 
 #: Seconds without a guess until Hangman ends
 HANGMAN_TIMEOUT = 60.0
@@ -88,10 +92,10 @@ class Hangman(Game):
         self.deadline = now + HANGMAN_TIMEOUT
         key = guess.casefold()
         if key in self.tried:
-            return [f"{user}, {guess} wurde bereits probiert."]
+            return [f"{_e(user)}, {_e(guess)} wurde bereits probiert."]
         if _same(guess, self.word):
             self.running = False
-            return [f"Volltreffer {user}, {self.word} ist richtig!"]
+            return [f"Volltreffer {_e(user)}, {self.word} ist richtig!"]
 
         self.tried.add(key)
         if len(guess) == 1:
@@ -101,13 +105,13 @@ class Hangman(Game):
                     self.revealed[i] = True
                 if all(self.revealed):
                     self.running = False
-                    return [f"Die Lösung wurde von {user} gefunden: {self.word}"]
-                return [f"{user}, der Buchstabe {_display(guess)} kommt vor: {self.pattern()}"]
+                    return [f"Die Lösung wurde von {_e(user)} gefunden: {self.word}"]
+                return [f"{_e(user)}, der Buchstabe {_e(_display(guess))} kommt vor: {self.pattern()}"]
             self.remaining -= 1
-            answer = [f"{user}, der Buchstabe {_display(guess)} kommt nicht vor!"]
+            answer = [f"{_e(user)}, der Buchstabe {_e(_display(guess))} kommt nicht vor!"]
         else:
             self.remaining -= HANGMAN_WRONG_SOLUTION
-            answer = [f"{user}, {guess} war leider nicht die richtige Lösung."]
+            answer = [f"{_e(user)}, {_e(guess)} war leider nicht die richtige Lösung."]
 
         if self.remaining <= 0:
             self.running = False
@@ -157,8 +161,8 @@ class Wordmix(Game):
             return [f"Gesucht: <b>{self.shuffled}</b>"]
         if _same(guess, self.word):
             self.running = False
-            return [f"Volltreffer {user}, {self.word} ist richtig!"]
-        return [f"{user}, {guess} war leider nicht die richtige Lösung."]
+            return [f"Volltreffer {_e(user)}, {self.word} ist richtig!"]
+        return [f"{_e(user)}, {_e(guess)} war leider nicht die richtige Lösung."]
 
     def timeout(self, now: float) -> list[str]:
         self.running = False
@@ -179,7 +183,8 @@ class Timebomb(Game):
 
     def start(self) -> list[str]:
         return [
-            f"{self.offender} schiebt {self.victim} eine Bombe zu! Der Timer sagt: <b>{self.seconds}</b> Sekunden!",
+            f"{_e(self.offender)} schiebt {_e(self.victim)} eine Bombe zu! "
+            f"Der Timer sagt: <b>{self.seconds}</b> Sekunden!",
             "Schneide ein Kabel mit <b>!schneide FARBE</b> durch. "
             f"Die Bombe hat folgende Kabel: <b>{', '.join(self.wires)}</b>",
         ]
@@ -193,12 +198,12 @@ class Timebomb(Game):
             return [f"Welches Kabel? Die Bombe hat folgende Kabel: <b>{', '.join(self.wires)}</b>"]
         self.running = False
         if _same(wire, self.wire):
-            return [f"{self.victim} hat die Bombe entschärft. Glückwunsch!"]
+            return [f"{_e(self.victim)} hat die Bombe entschärft. Glückwunsch!"]
         return ["Das war leider das falsche Kabel!"]
 
     def timeout(self, now: float) -> list[str]:
         self.running = False
-        return [f"{self.victim} hat es nicht rechtzeitig geschafft, die Bombe zu entschärfen :-("]
+        return [f"{_e(self.victim)} hat es nicht rechtzeitig geschafft, die Bombe zu entschärfen :-("]
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,9 +247,9 @@ class Quiz(Game):
         if not answer:
             return [self.current.question]
         if not _same(answer, self.current.answer):
-            return [f"{answer} ist leider falsch!"]
+            return [f"{_e(answer)} ist leider falsch!"]
         praise = self.rng.choice(["Super", "Toll", "Sehr gut"])
-        return [f"{praise} {user}, {self.current.answer} ist korrekt!", *self._next(now)]
+        return [f"{praise} {_e(user)}, {self.current.answer} ist korrekt!", *self._next(now)]
 
     def timeout(self, now: float) -> list[str]:
         answer = ["Die Frage wurde nicht rechtzeitig beantwortet."]
