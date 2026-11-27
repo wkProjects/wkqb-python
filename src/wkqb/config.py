@@ -7,7 +7,6 @@ regexes) are left out with a warning, so a bad setting can't crash the bot.
 
 import asyncio
 import json
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import IntEnum
@@ -15,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import aiohttp
+import regex
 from croniter import croniter
 
 from wkqb.games import Question, QuizSet
@@ -61,8 +61,9 @@ class CustomCommand:
 @dataclass(frozen=True, slots=True)
 class Pattern:
     pattern: str
-    regex: re.Pattern[str] | None
-    """Compiled for type "regex", None for plain text"""
+    regex: regex.Pattern[str] | None
+    """Compiled for type "regex", None for plain text. The regex module, not re: it can stop a match
+    after a time limit (see wkqb.bot), and it copes with nested repetitions re takes ages for."""
     reaction: Sequence[str]
     needs_bot_name: bool
     guest_reaction: bool
@@ -163,15 +164,15 @@ def parse(data: Any) -> tuple[Config, list[str]]:
         text, reaction = _str(entry.get("pattern")), _lines(entry.get("reaction"))
         if not text.strip() or not reaction:
             continue
-        regex = None
+        compiled = None
         if entry.get("type") == "regex":
             try:
-                regex = re.compile(text)
-            except (re.error, RecursionError, OverflowError) as e:
+                compiled = regex.compile(text)
+            except (regex.error, RecursionError, OverflowError) as e:
                 warnings.append(f"KI: ungültiger regulärer Ausdruck {text!r} ignoriert ({e}).")
                 continue
         patterns.append(
-            Pattern(text, regex, reaction, bool(entry.get("needs_bot_name")), bool(entry.get("guest_reaction")))
+            Pattern(text, compiled, reaction, bool(entry.get("needs_bot_name")), bool(entry.get("guest_reaction")))
         )
 
     quiz = _dict(data.get("quiz"))

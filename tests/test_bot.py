@@ -1,5 +1,6 @@
 import logging
 import random
+import time
 from dataclasses import replace
 from datetime import datetime, timedelta
 
@@ -777,3 +778,25 @@ async def test_solution() -> None:
         "Das musst du mir flüstern!",
         f"/f Bert Die Lösung ist: hangman: Katze, zeitbombe: {bomb.wire}, quiz: Muh",
     ]
+
+
+async def test_slow_ki_regexes_are_cut_off(caplog: pytest.LogCaptureFixture) -> None:
+    def ki(pattern: str, reaction: str, regex: bool = False) -> dict[str, object]:
+        return {"pattern": pattern, "type": "regex" if regex else "plain", "reaction": [reaction]}
+
+    patterns = {
+        "pattern": {
+            "list": [
+                ki(r"(a|aa)+$", "nie", regex=True),  # takes ages on many a's followed by something else
+                ki(r"^(\w+\s?)*$", "nur Wörter", regex=True),  # was 15 s with re on a normal sentence
+                ki("Ende", "Ende erkannt"),
+            ]
+        }
+    }
+    bot, _, _ = make(configured(**patterns))
+    started = time.monotonic()
+    await bot.handle(msg("Emil", "a" * 40 + "!"))
+    await bot.handle(msg("Emil", "Ein ganz normaler Satz mit vielen Wörtern und am Ende!"))
+    assert time.monotonic() - started < 1
+    assert said(bot) == ["Ende erkannt"]  # the next entry still gets its turn
+    assert "'(a|aa)+$' war zu langsam" in caplog.text

@@ -51,6 +51,8 @@ ChangeIgnored = Callable[[str, str], Awaitable[Sequence[str]]]
 WELCOME_BACK = timedelta(hours=6)
 #: Greetings wait a little, so the newcomer's chat window is ready
 GREETING_DELAY = timedelta(seconds=5)
+#: Seconds a KI regex may take for one message
+KI_TIMEOUT = 0.1
 #: How often users may start these games (mods and up always can)
 COOLDOWNS = {"zeitbombe": timedelta(seconds=60), "quiz": timedelta(minutes=3)}
 
@@ -600,10 +602,18 @@ def _contains_word(text: str, word: str) -> bool:
 
 
 def _match(entry: Pattern, text: str) -> dict[int, str] | None:
-    """The groups ($0 is the whole match) if the entry matches text, else None."""
+    """The groups ($0 is the whole match) if the entry matches text, else None.
+
+    A regex that takes longer than KI_TIMEOUT counts as no match: managers can enter patterns like
+    (a|aa)+$, which would otherwise block the bot for minutes on an unlucky message.
+    """
     if entry.regex is None:
         return {0: entry.pattern} if _contains_word(text, entry.pattern) else None
-    found = entry.regex.search(text)
+    try:
+        found = entry.regex.search(text, timeout=KI_TIMEOUT)
+    except TimeoutError:
+        logger.warning("KI-Eintrag %r war zu langsam und wurde übersprungen", entry.pattern)
+        return None
     if found is None:
         return None
     return {0: found.group(0)} | {i: g for i, g in enumerate(found.groups(), 1) if g is not None}

@@ -7,6 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "aiohttp>=3.14,<4",
     "croniter>=7,<8",
+    "regex>=2026.11",
     "tzdata>=2025.1",
 ]
 
@@ -21,6 +22,7 @@ dev = [
     "pytest-asyncio>=1.5",
     "ruff>=0.17",
     "types-croniter>=6.2.4.20261122",
+    "types-regex>=2026.11.25.20261127",
 ]
 
 [build-system]
