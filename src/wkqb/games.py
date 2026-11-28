@@ -6,11 +6,16 @@ injected random.Random. Texts are those of the old bot, except where it misbehav
 
 Names and guesses from the chat are HTML-escaped where they are repeated (the bot may be a chat
 admin, whose messages can contain HTML); words, questions and answers from the settings are not.
+
+Points: a game asks `scores(user)` whether a player gets points (the points system is on and they
+aren't a guest), announces them in its lines and notes them in `awards`, which the bot collects and
+reports to wkqb-web. The rules are those of the wkQB docs (2011).
 """
 
 import random
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from fractions import Fraction
 from html import escape as _e
 
 #: Seconds without a guess until Hangman ends
@@ -32,6 +37,13 @@ POTATO_MIN_PLAYERS = 3
 POTATO_THROW_TIME = 12.0
 #: The potato is cold after this many throws
 POTATO_THROWS = (10, 20)
+
+TIMEBOMB_POINTS = 5
+#: For a single winner, and for each of several winners when the potato got cold
+POTATO_POINTS = (5, 3)
+QUIZ_POINTS = 2
+#: For the most right answers of a quiz, split between equal players (rounded down)
+QUIZ_BONUS = 10
 
 WIRES = (
     "Rot",
@@ -58,9 +70,38 @@ def _same(a: str, b: str) -> bool:
     return " ".join(a.casefold().split()) == " ".join(b.casefold().split())
 
 
+#: Does this player get points?
+Scores = Callable[[str], bool]
+
+
+def _nobody(user: str) -> bool:
+    return False
+
+
 class Game:
     running = True
     deadline: float | None = None
+
+    def __init__(self, scores: Scores | None) -> None:
+        self.scores = scores or _nobody
+        self.awards: list[tuple[str, int]] = []
+        """Points won since the bot last collected them"""
+
+    def award(self, user: str, points: int) -> bool:
+        """Notes the points if the player gets them; True if so."""
+        if points > 0 and self.scores(user):
+            self.awards.append((user, points))
+            return True
+        return False
+
+    def awarded(self, users: Iterable[str], points: int) -> str:
+        """Awards each player, and the announcement after a space (empty if nobody got points)."""
+        winners = [user for user in users if self.award(user, points)]
+        if not winners:
+            return ""
+        if len(winners) == 1:
+            return f" {_e(winners[0])} bekommt {_points(points)}!"
+        return f" {_e(', '.join(winners))} bekommen je {_points(points)}!"
 
     def tick(self, now: float) -> list[str]:
         """The lines to send when the time is up, else nothing."""
@@ -82,9 +123,11 @@ class Hangman(Game):
         *,
         sign: str = "!",
         picture: str | None = None,
+        scores: Scores | None = None,
     ) -> None:
         """picture: shown with the used tries, "{n}" is their number (0-10), e.g. ':hangman{n}' (a chat smiley)
         or an <img> tag (only works if the bot is a chat admin); None for text only."""
+        super().__init__(scores)
         self.word = rng.choice(words).strip()
         self.sign = sign
         self.picture = picture
@@ -120,12 +163,15 @@ class Hangman(Game):
             return [f"{_e(user)}, {_e(guess)} wurde bereits probiert."]
         if _same(guess, self.word):
             self.running = False
-            return [f"Volltreffer {_e(user)}, {self.word} ist richtig!"]
+            # as many points as tries are left
+            return [f"Volltreffer {_e(user)}, {self.word} ist richtig!{self.awarded([user], self.remaining)}"]
 
         self.tried.add(key)
         if len(guess) == 1:
             hits = [i for i, ch in enumerate(self.word) if ch.casefold() == key]
             if hits:
+                # a point per letter, without announcing it (as the old bot)
+                self.award(user, 1)
                 for i in hits:
                     self.revealed[i] = True
                 if all(self.revealed):
@@ -177,11 +223,14 @@ class Wordmix(Game):
         *,
         sign: str = "!",
         hints: bool = False,
+        scores: Scores | None = None,
     ) -> None:
+        super().__init__(scores)
         self.word = rng.choice(words).strip()
         self.show_solution = show_solution
         self.sign = sign
         self.hint_times = [now + after for after in WORDMIX_HINTS] if hints else []
+        self.hints_shown = 0
         letters = self.word.lower()
         # the hints show the first and the last letter, then one more in between
         self.hinted = {0, len(letters) - 1}
@@ -208,13 +257,21 @@ class Wordmix(Game):
             return [f"Gesucht: <b>{self.shuffled}</b>"]
         if _same(guess, self.word):
             self.running = False
-            return [f"Volltreffer {_e(user)}, {self.word} ist richtig!"]
+            return [f"Volltreffer {_e(user)}, {self.word} ist richtig!{self.awarded([user], self.points())}"]
         return [f"{_e(user)}, {_e(guess)} war leider nicht die richtige Lösung."]
+
+    def points(self) -> int:
+        """Half the length for words up to 10 letters, 7 up to 20, else 15; halved after the first hint,
+        a third after the second, rounded down."""
+        length = len(self.word)
+        base = Fraction(length, 2) if length <= 10 else 7 if length <= 20 else 15
+        return int(base / (self.hints_shown + 1))
 
     def tick(self, now: float) -> list[str]:
         answer = super().tick(now)
         if self.running and self.hint_times and now >= self.hint_times[0]:
             self.hint_times.pop(0)
+            self.hints_shown += 1
             if not self.hint_times and self.second_hint is not None:
                 self.hinted.add(self.second_hint)
             answer.append(f"Tipp: <b>{self.hint()}</b>")
@@ -233,7 +290,17 @@ class Wordmix(Game):
 
 
 class Timebomb(Game):
-    def __init__(self, offender: str, victim: str, now: float, rng: random.Random, *, sign: str = "!") -> None:
+    def __init__(
+        self,
+        offender: str,
+        victim: str,
+        now: float,
+        rng: random.Random,
+        *,
+        sign: str = "!",
+        scores: Scores | None = None,
+    ) -> None:
+        super().__init__(scores)
         self.sign = sign
         self.offender = offender
         self.victim = victim or offender
@@ -259,7 +326,10 @@ class Timebomb(Game):
             return [f"Welches Kabel? Die Bombe hat folgende Kabel: <b>{', '.join(self.wires)}</b>"]
         self.running = False
         if _same(wire, self.wire):
-            return [f"{_e(self.victim)} hat die Bombe entschärft. Glückwunsch!"]
+            return [
+                f"{_e(self.victim)} hat die Bombe entschärft. Glückwunsch!"
+                f"{self.awarded([self.victim], TIMEBOMB_POINTS)}"
+            ]
         return [f"Das war leider das falsche Kabel! Richtig wäre <b>{self.wire}</b> gewesen."]
 
     def cheat(self, user: str) -> list[str]:
@@ -304,12 +374,17 @@ def quiz_menu(quizzes: Sequence[QuizSet], sign: str = "!") -> list[str]:
 
 
 class Quiz(Game):
-    def __init__(self, quiz: QuizSet, show_solution: bool, now: float, rng: random.Random) -> None:
+    def __init__(
+        self, quiz: QuizSet, show_solution: bool, now: float, rng: random.Random, *, scores: Scores | None = None
+    ) -> None:
+        super().__init__(scores)
         self.quiz = quiz
         self.questions = rng.sample(list(quiz.questions), min(len(quiz.questions), QUIZ_MAX_QUESTIONS))
         self.show_solution = show_solution
         self.rng = rng
         self.index = 0
+        self.right: dict[str, tuple[str, int]] = {}
+        """Right answers by lower-case name: (name, number)"""
         self.deadline = now + QUIZ_QUESTION_TIME
 
     @property
@@ -333,7 +408,10 @@ class Quiz(Game):
 
     def _correct(self, user: str, now: float) -> list[str]:
         praise = self.rng.choice(["Super", "Toll", "Sehr gut"])
-        return [f"{praise} {_e(user)}, {self.current.answer} ist korrekt!", *self._next(now)]
+        _, number = self.right.get(user.casefold(), (user, 0))
+        self.right[user.casefold()] = (user, number + 1)
+        points = self.awarded([user], QUIZ_POINTS)
+        return [f"{praise} {_e(user)}, {self.current.answer} ist korrekt!{points}", *self._next(now)]
 
     def timeout(self, now: float) -> list[str]:
         answer = ["Die Frage wurde nicht rechtzeitig beantwortet."]
@@ -341,11 +419,23 @@ class Quiz(Game):
             answer.append(f"Die korrekte Antwort war: {self.current.answer}")
         return answer + self._next(now)
 
+    def _winners(self) -> str:
+        """Who answered the most questions, and their extra points."""
+        if not self.right:
+            return "Leider wurde keine Frage richtig beantwortet."
+        most = max(number for _, number in self.right.values())
+        winners = [name for name, number in self.right.values() if number == most]
+        answers = "richtigen Antwort" if most == 1 else "richtigen Antworten"
+        bonus = self.awarded(winners, QUIZ_BONUS // len(winners))
+        if len(winners) == 1:
+            return f"{_e(winners[0])} hat mit {most} {answers} gewonnen!{bonus}"
+        return f"Gewonnen haben {_e(', '.join(winners))} mit je {most} {answers}!{bonus}"
+
     def _next(self, now: float) -> list[str]:
         self.index += 1
         if self.index >= len(self.questions):
             self.running = False
-            return ["Das waren alle Fragen, das Quiz ist daher beendet!"]
+            return [f"Das waren alle Fragen, das Quiz ist daher beendet! {self._winners()}"]
         self.deadline = now + QUIZ_QUESTION_TIME
         return [self.current.question]
 
@@ -356,7 +446,10 @@ class HotPotato(Game):
     is cold and all remaining players win.
     """
 
-    def __init__(self, starter: str, now: float, rng: random.Random, *, sign: str = "!") -> None:
+    def __init__(
+        self, starter: str, now: float, rng: random.Random, *, sign: str = "!", scores: Scores | None = None
+    ) -> None:
+        super().__init__(scores)
         self.sign = sign
         self.rng = rng
         self.players = [starter]
@@ -392,7 +485,10 @@ class HotPotato(Game):
         self.throws += 1
         if self.throws >= self.cold_after:
             self.running = False
-            return [f"Die Kartoffel ist kalt! Gewonnen haben: {_e(', '.join(self.players))}"]
+            return [
+                f"Die Kartoffel ist kalt! Gewonnen haben: {_e(', '.join(self.players))}"
+                f"{self.awarded(self.players, POTATO_POINTS[1])}"
+            ]
         return self._throw_to_someone(now)
 
     def timeout(self, now: float) -> list[str]:
@@ -408,7 +504,7 @@ class HotPotato(Game):
         self.players = [player for player in self.players if not _same(player, loser)]
         if len(self.players) == 1:
             self.running = False
-            return [why, f"{_e(self.players[0])} hat gewonnen!"]
+            return [why, f"{_e(self.players[0])} hat gewonnen!{self.awarded(self.players, POTATO_POINTS[0])}"]
         if self.holder is not None and not _same(self.holder, loser):
             # the potato stays where it is
             return [why]
@@ -418,3 +514,7 @@ class HotPotato(Game):
         self.holder = self.rng.choice(self.players)
         self.deadline = now + POTATO_THROW_TIME
         return [f"Die heiße Kartoffel fliegt zu <b>{_e(self.holder)}</b>! Schnell, <b>{_e(self.sign)}wurf</b>!"]
+
+
+def _points(number: int) -> str:
+    return "1 Punkt" if number == 1 else f"{number} Punkte"

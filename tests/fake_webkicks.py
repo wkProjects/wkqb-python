@@ -79,6 +79,11 @@ class FakeWebkicks:
     stream_connected: asyncio.Event = field(default_factory=asyncio.Event)
     config: Any = field(default_factory=dict)
     """Served as the bot's settings at /api/config.php"""
+    points: dict[str, tuple[str, int]] = field(default_factory=dict)
+    """(name, points) by lower-case name"""
+    points_active: bool = True
+    points_raw: str | None = None
+    """Body to answer the next points request with, instead of the real answer (used once)"""
 
     def app(self) -> web.Application:
         app = web.Application()
@@ -90,6 +95,8 @@ class FakeWebkicks:
         app.router.add_post("/cgi-bin/chat.cgi", self._send)
         app.router.add_get("/api/config.php", self._config)
         app.router.add_post("/api/ignored.php", self._ignored)
+        app.router.add_get("/api/points.php", self._points_get)
+        app.router.add_post("/api/points.php", self._points_post)
         return app
 
     @property
@@ -112,6 +119,56 @@ class FakeWebkicks:
             names.append(str(form["add"]))
         users["ignored"] = names
         return web.json_response({"ignored": names})
+
+    def _ranked(self) -> list[dict[str, Any]]:
+        """Everybody with points, most first, with dense ranks"""
+        entries = sorted(self.points.values(), key=lambda entry: (-entry[1], entry[0].casefold()))
+        ranks = sorted({points for _, points in entries}, reverse=True)
+        return [{"rank": ranks.index(points) + 1, "name": name, "points": points} for name, points in entries]
+
+    def _points_failure(self) -> web.Response | None:
+        if self.points_raw is not None:
+            raw, self.points_raw = self.points_raw, None
+            return web.Response(text=raw, content_type="application/json")
+        return self._failure("points")
+
+    async def _points_get(self, request: web.Request) -> web.Response:
+        """wkqb-web's points: ?limit=N for the toplist, ?name=X for one standing"""
+        if failure := self._points_failure():
+            return failure
+        ranked = self._ranked()
+        if "name" in request.query:
+            name = request.query["name"]
+            found = next((entry for entry in ranked if entry["name"].casefold() == name.casefold()), None)
+            entry = found or {"name": name, "points": 0, "rank": None}
+            return web.json_response({"active": self.points_active, **entry})
+        limit = int(request.query.get("limit", "10"))
+        return web.json_response({"active": self.points_active, "toplist": ranked[:limit]})
+
+    async def _points_post(self, request: web.Request) -> web.Response:
+        """wkqb-web's points: exactly one of add={name: change}, reset=true, active=bool"""
+        body = await request.json()
+        if failure := self._points_failure():
+            return failure
+        if "active" in body:
+            self.points_active = bool(body["active"])
+            return web.json_response({"active": self.points_active})
+        if body.get("reset") is True:
+            deleted = len(self.points)
+            self.points.clear()
+            return web.json_response({"active": self.points_active, "deleted": deleted})
+        if not self.points_active:
+            return web.json_response({"error": "points disabled", "active": False}, status=409)
+        totals: dict[str, int] = {}
+        for name, change in body["add"].items():
+            _, before = self.points.get(name.casefold(), (name, 0))
+            totals[name] = max(0, before + change)
+            # the last spelling wins, nobody is listed with 0
+            if totals[name]:
+                self.points[name.casefold()] = (name, totals[name])
+            else:
+                self.points.pop(name.casefold(), None)
+        return web.json_response({"active": True, "points": totals})
 
     async def _config(self, request: web.Request) -> web.Response:
         if failure := self._failure("config"):
@@ -234,6 +291,11 @@ class FakeWebkicks:
                 content_type="text/html",
             )
         message = str(form.get("message", ""))
+        if len(message.encode()) > 820:
+            # as measured in a real chat: the message is dropped
+            return web.Response(
+                text="<html><title>Fehler</title><body>Fehler: fs54SdFsA.</body></html>", content_type="text/html"
+            )
         self.sent.append((user, message))
         if message == "/exit":
             self.online.discard(user.lower())

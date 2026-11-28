@@ -5,7 +5,7 @@ import aiohttp
 import pytest
 
 from fake_webkicks import FakeWebkicks
-from wkqb.webkicks import ChatUrl, Credentials, NotLoggedIn, Webkicks, WebkicksError
+from wkqb.webkicks import MAX_MESSAGE_BYTES, ChatUrl, Credentials, MessageRefused, NotLoggedIn, Webkicks, WebkicksError
 
 
 class Events(list[tuple[str, dict[str, Any]]]):
@@ -168,6 +168,19 @@ async def test_send_without_login(
     with pytest.raises(NotLoggedIn):
         await client.send("Hallo")
     assert fake.sent == [("TestBot", "Hallo"), ("TestBot", "/exit")]
+
+
+async def test_too_long_messages_are_refused(
+    fake: FakeWebkicks, session: aiohttp.ClientSession, chat: ChatUrl, credentials: Credentials
+) -> None:
+    client = Webkicks(session, chat, credentials)
+    await client.fetch_sid()
+    await client.login()
+    await client.send("ä" * (MAX_MESSAGE_BYTES // 2))
+    with pytest.raises(MessageRefused, match="fs54SdFsA"):
+        await client.send("ä" * (MAX_MESSAGE_BYTES // 2) + "x")
+    await client.send("weiter geht's")
+    assert [message for _, message in fake.sent] == ["ä" * (MAX_MESSAGE_BYTES // 2), "weiter geht's"]
 
 
 async def test_retries_once_when_the_server_closed_the_connection(

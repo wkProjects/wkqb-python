@@ -85,6 +85,10 @@ class Config:
     bot_id: str = ""
     ignored_api: str | None = None
     """Where !ignore and !unignore change the ignore list (wkqb-web: POST with add= or remove=)"""
+    points_api: str | None = None
+    """Where the points are kept (wkqb-web: /api/points.php, see wkqb.points)"""
+    points_active: bool = False
+    """The games hand out points; off without points_api"""
     guest_mode: GuestMode = GuestMode.IGNORE
     command_sign: str = "!"
     can_start_games: int = 0
@@ -206,9 +210,13 @@ def parse(data: Any) -> tuple[Config, list[str]]:
         else:
             warnings.append("Hangman: ungültige Bild-Vorlage, es wird nur Text ausgegeben.")
 
+    points_api = _str(_dict(data.get("api")).get("points")).strip() or None
+
     config = Config(
         bot_id=_str(data.get("bot_id")).strip(),
         ignored_api=_str(_dict(data.get("api")).get("ignored")).strip() or None,
+        points_api=points_api,
+        points_active=points_api is not None and _dict(data.get("points")).get("active") is True,
         guest_mode=guest_mode,
         jointext=_str(data.get("jointext")),
         quote_cron=quote_cron,

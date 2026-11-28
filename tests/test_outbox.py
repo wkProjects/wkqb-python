@@ -6,8 +6,8 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from wkqb.outbox import Outbox
-from wkqb.webkicks import NotLoggedIn
+from wkqb.outbox import Outbox, fit
+from wkqb.webkicks import MAX_MESSAGE_BYTES, NotLoggedIn
 
 
 class Chat:
@@ -106,3 +106,45 @@ async def test_not_logged_in_ends_the_session_and_keeps_the_message() -> None:
     async with running(outbox, chat):  # the next session
         await until(lambda: len(chat.sent) == 2)
     assert chat.texts == ["eins", "zwei"]
+
+
+@pytest.mark.parametrize("text", ["kurz", "x" * MAX_MESSAGE_BYTES, "ä" * (MAX_MESSAGE_BYTES // 2)])
+def test_fitting_texts_stay_as_they_are(text: str) -> None:
+    assert fit(text) == text
+
+
+@pytest.mark.parametrize("unit", ["x", "ä", "😀", "x😀"])
+def test_long_texts_are_shortened_to_the_byte_limit(unit: str) -> None:
+    text = unit * 1000
+    short = fit(text)
+    assert short.endswith("…") and text.startswith(short[:-1])
+    assert MAX_MESSAGE_BYTES - 4 < len(short.encode()) <= MAX_MESSAGE_BYTES
+
+
+def test_shortening_prefers_a_space() -> None:
+    assert fit("ein Satz mit Wörtern " * 10, 50) == "ein Satz mit Wörtern ein Satz mit Wörtern ein…"
+    assert fit("ab " + "x" * 100, 20) == "ab…"
+    # no space near the end: cut in the word
+    assert fit("ab " + "x" * 100, 60) == "ab " + "x" * 54 + "…"
+
+
+@pytest.mark.parametrize(
+    ("text", "short"),
+    [
+        ("x" * 15 + "<b>fett</b>", "x" * 15 + "…"),
+        ("x" * 15 + '<font color="red">', "x" * 15 + "…"),
+        ("x" * 15 + "&amp;&amp;", "x" * 15 + "…"),
+        ("x" * 15 + "&#8364;", "x" * 15 + "…"),
+        ("x" * 13 + "&lt;" + "x" * 10, "x" * 13 + "&lt;…"),
+    ],
+)
+def test_shortening_keeps_tags_and_entities_whole(text: str, short: str) -> None:
+    assert fit(text, 20) == short
+
+
+async def test_long_messages_are_shortened(caplog: pytest.LogCaptureFixture) -> None:
+    outbox = Outbox()
+    with caplog.at_level(logging.WARNING):
+        outbox.put("x" * 900, "kurz")
+    assert outbox.pending() == [fit("x" * 900), "kurz"]
+    assert "zu lang für Webkicks (900 Bytes)" in caplog.text

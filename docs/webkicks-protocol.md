@@ -46,6 +46,15 @@ Recorded on 2026-11-28 (the Perl bot expected it around 04:25):
 | message or command sent | HTTP 204, empty body |
 | `/exit` | HTTP 200, page "bye, <user>" |
 | account not logged in | HTTP 200, page "Fehler: Timeout. Bitte neu einloggen." |
+| message field longer than 820 bytes | HTTP 200, page "Fehler: fs54SdFsA.", the message is dropped |
+
+### Message length
+
+Measured on 2026-11-28 with a normal account (public messages and whispers alike): `message` may have up to
+**820 bytes in UTF-8**, counted over the whole field, so a whisper's `/f NAME ` counts too. An umlaut takes 2 bytes,
+an emoji 4, `&` 1 (the limit is applied to the decoded form field, not to what the chat shows). 821 bytes and more
+are refused as a whole, nothing is cut off. Webkicks itself speaks of 800 characters. The bot's outbox shortens
+longer messages (`wkqb.outbox.fit()`), and `webkicks.send()` raises `MessageRefused` on the error page.
 
 Errors of commands (unknown room, whisper to someone offline) arrive as Chat-Bot-PM in the stream, not in the
 answer.

@@ -37,8 +37,10 @@ from wkqb.events import (
     Whisper,
 )
 from wkqb.games import Game, Hangman, HotPotato, Quiz, Timebomb, Wordmix, quiz_menu
-from wkqb.outbox import Outbox
+from wkqb.outbox import Outbox, fit
+from wkqb.points import MAX_CHANGE, NICK, Points, PointsDisabled, PointsError
 from wkqb.tokens import render
+from wkqb.webkicks import MAX_MESSAGE_BYTES
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,8 @@ GREETING_DELAY = timedelta(seconds=5)
 KI_TIMEOUT = 0.1
 #: How often users may start these games (mods and up always can)
 COOLDOWNS = {"zeitbombe": timedelta(seconds=60), "quiz": timedelta(minutes=3)}
+#: Entries of !toplist: by default, and at most (it's one chat line)
+TOPLIST = (10, 20)
 
 
 class Level(IntEnum):
@@ -98,6 +102,7 @@ class Bot:
         reload: Reload,
         *,
         change_ignored: ChangeIgnored | None = None,
+        points: Points | None = None,
         rng: random.Random | None = None,
         clock: Callable[[], datetime] = cron.now,
     ) -> None:
@@ -105,6 +110,9 @@ class Bot:
         self.outbox = outbox
         self._reload = reload
         self._change_ignored = change_ignored
+        self._points = points
+        self._reports: set[asyncio.Task[None]] = set()
+        """Points being reported to wkqb-web"""
         self._started: dict[str, datetime] = {}
         """When the games with a cooldown were last started"""
         self._rng = rng or random.Random()
@@ -134,7 +142,9 @@ class Bot:
         """The chat stream runs; the first time, the bot says hello."""
         if not self._greeted_once:
             self._greeted_once = True
-            self.say(f"{self.config.jointext} (wkQB {VERSION}, https://wkqb.de)".strip())
+            suffix = f"(wkQB {VERSION}, https://wkqb.de)"
+            jointext = fit(self.config.jointext.strip(), MAX_MESSAGE_BYTES - len(suffix) - 1)
+            self.say(f"{jointext} {suffix}".strip())
 
     def tick(self) -> None:
         """Called about once a second: scheduled messages, greetings, game timeouts."""
@@ -144,8 +154,7 @@ class Bot:
         self.say(*due)
         for name, game in list(self.games.items()):
             self.say(*game.tick(now.timestamp()))
-            if not game.running:
-                del self.games[name]
+            self._after(name, game)
         if self._quote_schedule is not None and self._quote_schedule.due(now):
             self._send_quote(self._rng.randrange(len(self.config.quotes)))
         for schedule, message in self._calendar:
@@ -202,7 +211,10 @@ class Bot:
     async def _message(self, event: Message | Whisper) -> None:
         if self._is_me(event.user):
             return
-        guest = event.guest or event.user.casefold() in self._guests
+        if event.guest:
+            # remembered for the points of games, which other players can end
+            self._guests.add(event.user.casefold())
+        guest = event.user.casefold() in self._guests
         level = self.level(event.user, guest)
         if level == Level.IGNORED:
             return
@@ -213,8 +225,7 @@ class Bot:
             if isinstance(quiz, Quiz) and isinstance(event, Message):
                 # quiz answers can be sent as normal messages
                 self.say(*quiz.check(event.user, event.text, self._clock().timestamp()))
-                if not quiz.running:
-                    del self.games["quiz"]
+                self._after("quiz", quiz)
             self._patterns(event, level)
             return
         if level == Level.GUEST and self.config.guest_mode != GuestMode.FULL:
@@ -413,14 +424,27 @@ class Bot:
                 return
             if name == "hangman":
                 game = Hangman(
-                    settings.words, settings.show_solution, now, self._rng, sign=sign, picture=settings.picture
+                    settings.words,
+                    settings.show_solution,
+                    now,
+                    self._rng,
+                    sign=sign,
+                    picture=settings.picture,
+                    scores=self._scores,
                 )
             else:
-                game = Wordmix(settings.words, settings.show_solution, now, self._rng, sign=sign, hints=settings.hint)
+                game = Wordmix(
+                    settings.words,
+                    settings.show_solution,
+                    now,
+                    self._rng,
+                    sign=sign,
+                    hints=settings.hint,
+                    scores=self._scores,
+                )
             self.games[name] = game
             self.say(*game.start())
-        if not game.running:
-            del self.games[name]
+        self._after(name, game)
 
     async def _quiz(self, command: Command) -> None:
         now = self._clock().timestamp()
@@ -438,11 +462,10 @@ class Bot:
             if not self._may_start_games(command) or not self._cooled_down(command, "quiz", "Das nächste Quiz"):
                 return
             game = self.games["quiz"] = Quiz(
-                quizzes[int(command.param) - 1], self.config.quiz_show_solution, now, self._rng
+                quizzes[int(command.param) - 1], self.config.quiz_show_solution, now, self._rng, scores=self._scores
             )
             self.say(*game.start())
-        if not game.running:
-            del self.games["quiz"]
+        self._after("quiz", game)
 
     async def _timebomb(self, command: Command) -> None:
         if "zeitbombe" in self.games:
@@ -457,7 +480,14 @@ class Bot:
             return
         if not self._may_start_games(command) or not self._cooled_down(command, "zeitbombe", "Die nächste Bombe"):
             return
-        game = Timebomb(command.user, victim, self._clock().timestamp(), self._rng, sign=self.config.command_sign)
+        game = Timebomb(
+            command.user,
+            victim,
+            self._clock().timestamp(),
+            self._rng,
+            sign=self.config.command_sign,
+            scores=self._scores,
+        )
         self.games["zeitbombe"] = game
         self.say(*game.start())
 
@@ -471,7 +501,7 @@ class Bot:
             return
         # in public, even if whispered: everybody shall see it
         self.say(*game.cheat(command.user))
-        del self.games["zeitbombe"]
+        self._after("zeitbombe", game)
 
     async def _cut(self, command: Command) -> None:
         game = self.games.get("zeitbombe")
@@ -479,8 +509,7 @@ class Bot:
             self.say("Es läuft doch gar kein Spiel!")
             return
         self.say(*game.cut(command.user, command.param))
-        if not game.running:
-            del self.games["zeitbombe"]
+        self._after("zeitbombe", game)
 
     async def _potato(self, command: Command) -> None:
         game = self.games.get("kartoffel")
@@ -490,7 +519,7 @@ class Bot:
         if not self._may_start_games(command):
             return
         game = self.games["kartoffel"] = HotPotato(
-            command.user, self._clock().timestamp(), self._rng, sign=self.config.command_sign
+            command.user, self._clock().timestamp(), self._rng, sign=self.config.command_sign, scores=self._scores
         )
         self.say(*game.start())
 
@@ -500,8 +529,7 @@ class Bot:
             self.say("Es läuft doch gar kein Spiel!")
             return
         self.say(*game.throw(command.user, self._clock().timestamp()))
-        if not game.running:
-            del self.games["kartoffel"]
+        self._after("kartoffel", game)
 
     def _cooled_down(self, command: Command, game: str, what: str) -> bool:
         """Users may only start some games now and then; mods and up always can. Counts the start."""
@@ -519,6 +547,163 @@ class Bot:
             return True
         self.reply(command, f"{html.escape(command.user)}, du darfst leider keine Spiele starten.")
         return False
+
+    # -- points (kept by wkqb-web)
+
+    def _scores(self, user: str) -> bool:
+        """Does a player get points? Not while the points system is off, and not as a guest."""
+        config = self.config
+        if not config.points_active or config.points_api is None or self._points is None:
+            return False
+        if NICK.fullmatch(user) is None:
+            # e.g. a bomb for a made-up name; wkqb-web would refuse the whole report
+            return False
+        return self.level(user, user.casefold() in self._guests) >= Level.USER
+
+    def _after(self, name: str, game: Game) -> None:
+        """After a move: reports the points the game handed out, and forgets the game when it's over."""
+        if game.awards:
+            changes: dict[str, int] = {}
+            for user, points in game.awards:
+                key = next((k for k in changes if k.casefold() == user.casefold()), user)
+                changes[key] = changes.get(key, 0) + points
+            game.awards.clear()
+            if changes:
+                task = asyncio.create_task(self._report(changes))
+                self._reports.add(task)
+                task.add_done_callback(self._reports.discard)
+        if not game.running and self.games.get(name) is game:
+            del self.games[name]
+
+    async def _report(self, changes: dict[str, int]) -> None:
+        url = self.config.points_api
+        if url is None or self._points is None:
+            return
+        try:
+            await self._points.add(url, changes)
+        except PointsDisabled:
+            logger.info("Das Punktesystem wurde im Webinterface ausgeschaltet")
+            self.config = replace(self.config, points_active=False)
+        except PointsError as e:
+            logger.warning("Punkte konnten nicht gespeichert werden: %s", e)
+            logger.debug("Verlorene Punkte: %s", changes)
+
+    async def settle(self) -> None:
+        """Waits until the points handed out so far are reported."""
+        if self._reports:
+            await asyncio.gather(*self._reports)
+
+    def _points_api(self, command: Command, *, active: bool = True) -> tuple[Points, str] | None:
+        """The API and its address, if the command can use them; else answers why not."""
+        url = self.config.points_api
+        if url is None or self._points is None or (active and not self.config.points_active):
+            self.reply(command, "Das Punktesystem ist deaktiviert!")
+            return None
+        return self._points, url
+
+    def _points_failed(self, command: Command, error: PointsError) -> None:
+        if isinstance(error, PointsDisabled):
+            self.config = replace(self.config, points_active=False)
+            self.reply(command, "Das Punktesystem ist deaktiviert!")
+        else:
+            logger.warning("Punkte nicht abrufbar: %s", error)
+            self.reply(command, "Das hat leider nicht geklappt :-(")
+
+    async def _mypoints(self, command: Command) -> None:
+        if (api := self._points_api(command)) is None:
+            return
+        points, url = api
+        try:
+            standing = await points.standing(url, command.user)
+        except PointsError as e:
+            self._points_failed(command, e)
+            return
+        user = html.escape(command.user)
+        if standing.rank is None:
+            self.reply(command, f"{user}, du hast noch keine Punkte.")
+        else:
+            self.reply(command, f"{user}, du hast {_points(standing.points)} (Platz {standing.rank}).")
+
+    async def _toplist(self, command: Command) -> None:
+        if (api := self._points_api(command)) is None:
+            return
+        points, url = api
+        limit = int(command.param.split()[0]) if command.param and command.param.split()[0].isdigit() else TOPLIST[0]
+        try:
+            entries = await points.toplist(url, max(1, min(TOPLIST[1], limit)))
+        except PointsError as e:
+            self._points_failed(command, e)
+            return
+        if not entries:
+            self.reply(command, "Leider hat noch niemand einen Punkt! :-(")
+            return
+        # as many entries as fit into one message
+        prefix = f"/f {command.user} " if command.whispered else ""
+        line = "Toplist:"
+        for i, entry in enumerate(entries):
+            longer = f"{line}{',' if i else ''} {entry.rank}. {html.escape(entry.name)} ({_points(entry.points)})"
+            if len((prefix + longer).encode()) > MAX_MESSAGE_BYTES:
+                break
+            line = longer
+        self.reply(command, line)
+
+    async def _switch_points(self, command: Command, active: bool) -> None:
+        """!pointson / !pointsoff, for bot mods and up"""
+        if command.level < Level.MOD or (api := self._points_api(command, active=False)) is None:
+            return
+        points, url = api
+        try:
+            await points.set_active(url, active)
+        except PointsError as e:
+            self._points_failed(command, e)
+            return
+        self.config = replace(self.config, points_active=active)
+        self.reply(command, f"Das Punktesystem ist nun {'aktiviert' if active else 'deaktiviert'}!")
+
+    async def _points_on(self, command: Command) -> None:
+        await self._switch_points(command, True)
+
+    async def _points_off(self, command: Command) -> None:
+        await self._switch_points(command, False)
+
+    async def _modifypoints(self, command: Command) -> None:
+        """!modifypoints NAME POINTS (negative ones are taken away), for bot admins and up"""
+        if command.level < Level.ADMIN or (api := self._points_api(command)) is None:
+            return
+        parts = command.param.split()
+        if (
+            len(parts) != 2
+            or NICK.fullmatch(parts[0]) is None
+            or re.fullmatch(r"[+-]?\d{1,7}", parts[1]) is None
+            or not 0 < abs(int(parts[1])) <= MAX_CHANGE
+        ):
+            sign = html.escape(self.config.command_sign)
+            self.reply(command, f"So geht das: {sign}modifypoints NAME PUNKTE (z. B. 5 oder -5)")
+            return
+        name, change = parts[0], int(parts[1])
+        points, url = api
+        try:
+            totals = await points.add(url, {name: change})
+        except PointsError as e:
+            self._points_failed(command, e)
+            return
+        done = "gutgeschrieben" if change > 0 else "abgezogen"
+        total = totals.get(name, 0)
+        self.reply(
+            command, f"Dem Punktekonto von {name} wurden {_points(abs(change))} {done}! Neuer Stand: {_points(total)}."
+        )
+
+    async def _resetpoints(self, command: Command) -> None:
+        """!resetpoints, for the master only"""
+        if command.level < Level.MASTER or (api := self._points_api(command)) is None:
+            return
+        points, url = api
+        try:
+            await points.reset(url)
+        except PointsError as e:
+            self._points_failed(command, e)
+            return
+        self.reply(command, "Die Punkte wurden zurückgesetzt!")
 
     # -- greetings and KI
 
@@ -585,6 +770,10 @@ class Bot:
         return user.casefold() == self.name.casefold()
 
 
+def _points(number: int) -> str:
+    return "1 Punkt" if number == 1 else f"{number} Punkte"
+
+
 def _contains(names: Sequence[str], casefolded: str) -> bool:
     return any(n.casefold() == casefolded for n in names)
 
@@ -644,4 +833,10 @@ _SYSTEM_COMMANDS: dict[str, Callable[[Bot, Command], Awaitable[None]]] = {
     "schneide": Bot._cut,
     "kartoffel": Bot._potato,
     "wurf": Bot._throw,
+    "mypoints": Bot._mypoints,
+    "toplist": Bot._toplist,
+    "pointson": Bot._points_on,
+    "pointsoff": Bot._points_off,
+    "modifypoints": Bot._modifypoints,
+    "resetpoints": Bot._resetpoints,
 }

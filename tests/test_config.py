@@ -225,3 +225,35 @@ async def test_change_ignored(fake: FakeWebkicks, server: TestServer, session: a
         await change_ignored(session, url, "add", "x")
     with pytest.raises(ConfigError, match="ClientConnectorError"):
         await change_ignored(session, "http://127.0.0.1:1/x", "add", "x")
+
+
+def test_points_settings() -> None:
+    url = "https://wkqb.de/api/points.php?b_id=abcdef1234"
+    config, _ = parse({"api": {"points": url}, "points": {"active": True}})
+    assert config.points_api == url and config.points_active
+    config, _ = parse({"api": {"points": url}, "points": {"active": False}})
+    assert config.points_api == url and not config.points_active
+
+
+def test_points_are_off_by_default() -> None:
+    config, _ = parse({})
+    assert config.points_api is None and config.points_active is False
+    config, _ = parse({"api": {"points": None}})
+    assert config.points_api is None
+
+
+@pytest.mark.parametrize("api", [{}, {"points": None}, {"points": ""}, {"points": "  "}])
+def test_points_cant_be_active_without_an_api(api: dict[str, Any]) -> None:
+    config, _ = parse({"api": api, "points": {"active": True}})
+    assert config.points_api is None and config.points_active is False
+
+
+@pytest.mark.parametrize("active", [1, "true", "yes", None, [True], {}])
+def test_points_active_must_be_a_real_boolean(active: Any) -> None:
+    config, _ = parse({"api": {"points": "http://x/api/points.php"}, "points": {"active": active}})
+    assert config.points_active is False
+
+
+def test_points_active_without_the_points_section() -> None:
+    config, _ = parse({"api": {"points": "http://x/api/points.php"}})
+    assert config.points_api == "http://x/api/points.php" and config.points_active is False

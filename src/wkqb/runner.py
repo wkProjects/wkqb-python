@@ -23,6 +23,8 @@ from wkqb.bot import Bot
 from wkqb.config import Config, ConfigError
 from wkqb.events import ChatStarted, KeepAlive, Logout, TakenOver, TimeoutWarning, parse_line
 from wkqb.outbox import INTERVAL, Outbox
+from wkqb.points import TIMEOUT as POINTS_TIMEOUT
+from wkqb.points import HttpPoints
 from wkqb.redaction import redact, secrets
 from wkqb.stream import LineSplitter
 from wkqb.webkicks import ChatUrl, Credentials, Webkicks
@@ -88,7 +90,12 @@ class Runner:
         if config is None:
             return 0
         bot = self.bot = Bot(
-            self._credentials.username, config, self.outbox, self._load_config, change_ignored=self._change_ignored
+            self._credentials.username,
+            config,
+            self.outbox,
+            self._load_config,
+            change_ignored=self._change_ignored,
+            points=HttpPoints(self._http),
         )
         ticker = asyncio.create_task(self._ticker(bot))
         try:
@@ -97,6 +104,10 @@ class Runner:
             ticker.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await ticker
+            # the points of the last game
+            with contextlib.suppress(TimeoutError):
+                async with asyncio.timeout(POINTS_TIMEOUT + 1):
+                    await bot.settle()
 
     async def _sessions(self, bot: Bot, stop: asyncio.Event) -> int:
         delay = self._retry_min

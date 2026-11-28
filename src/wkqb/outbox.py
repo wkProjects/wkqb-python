@@ -5,16 +5,19 @@ the third warning (see docs/webkicks-protocol.md). The outbox keeps INTERVAL bet
 It outlives the chat sessions: messages queued while the bot reconnects are sent afterwards, unless
 they waited longer than MAX_AGE (a greeting minutes later would be odd). Chat texts are only logged
 at DEBUG (see the privacy policy of wkqb.de).
+
+Webkicks refuses messages longer than MAX_MESSAGE_BYTES, so longer ones are shortened (fit()).
 """
 
 import asyncio
 import logging
+import re
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from wkqb.webkicks import NotLoggedIn
+from wkqb.webkicks import MAX_MESSAGE_BYTES, NotLoggedIn
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +25,38 @@ INTERVAL = 2.5
 MAX_AGE = 60.0
 #: More waiting messages are dropped; at INTERVAL, 20 messages take almost a minute
 MAX_QUEUED = 20
+ELLIPSIS = "…"
+#: A shortened message ends at a space if there is one within this many characters
+_WORD_BOUNDARY = 40
+#: An HTML tag or entity that the cut would split
+_OPEN_TAG = re.compile(r"<[^>]*$")
+_OPEN_ENTITY = re.compile(r"&#?\w*$")
+
+
+def fit(text: str, limit: int = MAX_MESSAGE_BYTES) -> str:
+    """The text, shortened to at most `limit` UTF-8 bytes with "…" at the end if it is longer.
+
+    The cut prefers a space, and never splits a character, an HTML tag or an entity (an opened tag
+    may stay unclosed: the chat ends it with the line).
+    """
+    if len(text.encode()) <= limit:
+        return text
+    budget = limit - len(ELLIPSIS.encode())
+    end, size = 0, 0
+    for ch in text:
+        size += len(ch.encode())
+        if size > budget:
+            break
+        end += 1
+    cut = text[:end]
+    for unfinished in (_OPEN_TAG, _OPEN_ENTITY):
+        if match := unfinished.search(cut):
+            cut = cut[: match.start()]
+    space = cut.rfind(" ")
+    in_word = not text[len(cut)].isspace()
+    if in_word and space > 0 and len(cut) - space <= _WORD_BOUNDARY:
+        cut = cut[:space]
+    return cut.rstrip() + ELLIPSIS
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +85,9 @@ class Outbox:
                 logger.warning("Ausgabe-Warteschlange voll, Nachricht verworfen")
                 logger.debug("Verworfen: %s", text)
                 continue
+            if (size := len(text.encode())) > MAX_MESSAGE_BYTES:
+                logger.warning("Nachricht zu lang für Webkicks (%d Bytes), gekürzt", size)
+                text = fit(text)
             self._queue.append(_Queued(text, time.monotonic()))
         if self._queue:
             self._waiting.set()

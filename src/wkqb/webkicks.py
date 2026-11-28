@@ -30,10 +30,19 @@ _STREAM_URL = re.compile(r"""URL=([^"'\s>]+)""", re.IGNORECASE)
 _STREAM_TOKEN = re.compile(r"/chatstream/[^/]+/([^/]+)/stream")
 #: chat.cgi answers a message with HTTP 204 and no body; without a login it shows an error page
 _SEND_NOT_LOGGED_IN = "Bitte neu einloggen"
+#: Other refusals, e.g. "Fehler: fs54SdFsA." for a message that is too long
+_SEND_ERROR = re.compile(r"Fehler:\s*([^<]*)")
+#: The longest message field chat.cgi accepts, in UTF-8 bytes (a whisper's "/f NAME " included); longer
+#: messages are refused (measured 2026-11-28, see docs/webkicks-protocol.md)
+MAX_MESSAGE_BYTES = 820
 
 
 class WebkicksError(Exception):
     """Webkicks answered, but not as expected."""
+
+
+class MessageRefused(WebkicksError):
+    """chat.cgi didn't take the message (e.g. too long); the session goes on."""
 
 
 class NotLoggedIn(WebkicksError):
@@ -186,6 +195,8 @@ class Webkicks:
         )
         if _SEND_NOT_LOGGED_IN in body:
             raise NotLoggedIn("chat.cgi: not logged in")
+        if error := _SEND_ERROR.search(body):
+            raise MessageRefused(f"chat.cgi: {error.group(1).strip() or 'Fehler'}")
 
     async def logout(self) -> None:
         await self.send("/exit")

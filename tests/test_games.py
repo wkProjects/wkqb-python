@@ -1,4 +1,5 @@
 import random
+from collections.abc import Callable
 
 import pytest
 
@@ -177,7 +178,9 @@ class TestQuiz:
         [praise, question] = game.answer("bert", " muh ", 5)
         assert praise.endswith(" bert, Muh ist korrekt!") and question == "Wie macht die Katze?"
         assert game.deadline == 5 + QUIZ_QUESTION_TIME
-        assert game.answer("anna", "MIAU", 6)[1:] == ["Das waren alle Fragen, das Quiz ist daher beendet!"]
+        assert game.answer("anna", "MIAU", 6)[1:] == [
+            "Das waren alle Fragen, das Quiz ist daher beendet! Gewonnen haben bert, anna mit je 1 richtigen Antwort!"
+        ]
         assert not game.running
 
     @pytest.mark.parametrize(("show", "solution"), [(True, ["Die korrekte Antwort war: Muh"]), (False, [])])
@@ -188,7 +191,9 @@ class TestQuiz:
             *solution,
             "Wie macht die Katze?",
         ]
-        assert game.tick(2 * QUIZ_QUESTION_TIME)[-1] == "Das waren alle Fragen, das Quiz ist daher beendet!"
+        assert game.tick(2 * QUIZ_QUESTION_TIME)[-1] == (
+            "Das waren alle Fragen, das Quiz ist daher beendet! Leider wurde keine Frage richtig beantwortet."
+        )
         assert not game.running
 
 
@@ -332,3 +337,297 @@ def test_quiz_plain_answers() -> None:
     first = game.current
     assert game.check("anna", "falsch", 1) == []
     assert game.check("anna", f"  {first.answer.upper()} ", 2)[0].endswith(f"anna, {first.answer} ist korrekt!")
+
+
+def everybody(user: str) -> bool:
+    return True
+
+
+def only(*names: str) -> Callable[[str], bool]:
+    return lambda user: user in names
+
+
+class TestPointsHangman:
+    def game(self, word: str = "Katze", scores: Callable[[str], bool] | None = everybody) -> Hangman:
+        return Hangman([word], True, now=0, rng=rng(), scores=scores)
+
+    def test_a_point_per_new_correct_letter_without_announcement(self) -> None:
+        game = self.game("Banane")
+        assert game.guess("anna", "a", 1) == ["anna, der Buchstabe A kommt vor: _ A _ A _ _"]
+        game.guess("bert", "a", 2)  # already tried
+        game.guess("bert", "x", 3)  # wrong
+        game.guess("bert", "n", 4)
+        assert game.awards == [("anna", 1), ("bert", 1)]
+
+    def test_the_letter_that_completes_the_word_scores_too(self) -> None:
+        game = self.game("ab")
+        game.guess("anna", "a", 1)
+        assert game.guess("bert", "b", 2) == ["Die Lösung wurde von bert gefunden: ab"]
+        assert game.awards == [("anna", 1), ("bert", 1)]
+
+    def test_the_solution_gives_the_remaining_tries(self) -> None:
+        game = self.game()
+        game.guess("anna", "x", 1)
+        game.guess("anna", "Hund", 2)
+        assert game.remaining == 6  # a wrong word costs 3 tries
+        assert game.guess("bert", "katze", 3) == ["Volltreffer bert, Katze ist richtig! bert bekommt 6 Punkte!"]
+        assert game.awards == [("bert", 6)]
+
+    def test_one_point_is_singular(self) -> None:
+        game = self.game()
+        for i, wrong in enumerate(["Hund", "Maus", "Igel"]):
+            game.guess("anna", wrong, i)
+        assert game.remaining == 1
+        assert game.guess("bert", "Katze", 10) == ["Volltreffer bert, Katze ist richtig! bert bekommt 1 Punkt!"]
+
+    def test_nothing_for_a_lost_game_or_a_timeout(self) -> None:
+        game = self.game()
+        for i, wrong in enumerate(["Hund", "Maus", "Igel", "Wurm"]):
+            game.guess("anna", wrong, i)
+        assert not game.running and game.awards == []
+        game = self.game()
+        game.tick(HANGMAN_TIMEOUT)
+        assert game.awards == []
+
+    def test_players_without_points_get_nothing_silently(self) -> None:
+        game = self.game(scores=only("anna"))
+        game.guess("bert", "k", 1)
+        assert game.guess("bert", "katze", 2) == ["Volltreffer bert, Katze ist richtig!"]
+        assert game.awards == []
+
+    def test_without_scores_nobody_gets_points(self) -> None:
+        game = self.game(scores=None)
+        game.guess("anna", "k", 1)
+        assert game.guess("anna", "katze", 2) == ["Volltreffer anna, Katze ist richtig!"]
+        assert game.awards == []
+
+    def test_names_are_escaped_in_the_announcement(self) -> None:
+        game = self.game()
+        assert game.guess("<b>", "katze", 1) == [
+            "Volltreffer &lt;b&gt;, Katze ist richtig! &lt;b&gt; bekommt 10 Punkte!"
+        ]
+        assert game.awards == [("<b>", 10)]
+
+
+class TestPointsWordmix:
+    @pytest.mark.parametrize(
+        ("length", "points"),
+        [(1, 0), (2, 1), (7, 3), (10, 5), (11, 7), (12, 7), (20, 7), (21, 15), (30, 15)],
+    )
+    def test_points_by_length_without_hints(self, length: int, points: int) -> None:
+        game = Wordmix(["a" * length], True, now=0, rng=rng(), scores=everybody)
+        assert game.points() == points
+
+    @pytest.mark.parametrize(
+        ("length", "hints", "points"),
+        [(7, 1, 1), (7, 2, 1), (10, 1, 2), (10, 2, 1), (12, 1, 3), (12, 2, 2), (21, 1, 7), (21, 2, 5)],
+    )
+    def test_points_by_length_and_hints(self, length: int, hints: int, points: int) -> None:
+        game = Wordmix(["a" * length], True, now=0, rng=rng(), hints=True, scores=everybody)
+        for now in [150, 240][:hints]:
+            game.tick(now)
+        assert game.hints_shown == hints and game.points() == points
+
+    def test_the_announcement_and_the_award(self) -> None:
+        game = Wordmix(["Gemüse"], True, now=0, rng=rng(), scores=everybody)
+        assert game.guess("anna", "Gemüse", 1) == ["Volltreffer anna, Gemüse ist richtig! anna bekommt 3 Punkte!"]
+        assert game.awards == [("anna", 3)]
+
+    def test_with_a_hint_the_announcement_shows_the_lower_points(self) -> None:
+        game = Wordmix(["Gemüsesuppe"], True, now=0, rng=rng(), hints=True, scores=everybody)
+        game.tick(150)
+        assert game.guess("anna", "Gemüsesuppe", 151)[0].endswith("anna bekommt 3 Punkte!")
+
+    def test_a_word_worth_one_point_says_punkt(self) -> None:
+        game = Wordmix(["ab"], True, now=0, rng=rng(), scores=everybody)
+        assert game.guess("anna", "ab", 1) == ["Volltreffer anna, ab ist richtig! anna bekommt 1 Punkt!"]
+
+    def test_a_word_worth_nothing_gives_no_award(self) -> None:
+        game = Wordmix(["a"], True, now=0, rng=rng(), scores=everybody)
+        assert game.guess("anna", "a", 1) == ["Volltreffer anna, a ist richtig!"]
+        assert game.awards == []
+
+    def test_players_without_points_and_the_default(self) -> None:
+        game = Wordmix(["Gemüse"], True, now=0, rng=rng(), scores=only("bert"))
+        assert game.guess("anna", "Gemüse", 1) == ["Volltreffer anna, Gemüse ist richtig!"]
+        game = Wordmix(["Gemüse"], True, now=0, rng=rng())
+        assert game.guess("anna", "Gemüse", 1) == ["Volltreffer anna, Gemüse ist richtig!"]
+        assert game.awards == []
+
+    def test_nothing_after_the_time_is_up(self) -> None:
+        game = Wordmix(["Gemüse"], True, now=0, rng=rng(), scores=everybody)
+        game.tick(WORDMIX_TIME)
+        assert game.awards == []
+
+
+class TestPointsTimebomb:
+    def test_defusing_gives_5_points_to_the_victim(self) -> None:
+        game = Timebomb("anna", "bert", now=0, rng=rng(), scores=everybody)
+        assert game.cut("bert", game.wire) == ["bert hat die Bombe entschärft. Glückwunsch! bert bekommt 5 Punkte!"]
+        assert game.awards == [("bert", 5)]
+
+    def test_nothing_for_a_wrong_wire_cheating_or_the_timeout(self) -> None:
+        game = Timebomb("anna", "bert", now=0, rng=rng(), scores=everybody)
+        game.cut("bert", next(w for w in game.wires if w != game.wire))
+        assert game.awards == []
+        game = Timebomb("anna", "bert", now=0, rng=rng(), scores=everybody)
+        game.cheat("bert")
+        assert game.awards == []
+        game = Timebomb("anna", "bert", now=0, rng=rng(), scores=everybody)
+        game.tick(game.seconds)
+        assert game.awards == []
+
+    def test_nothing_for_the_victim_without_points(self) -> None:
+        game = Timebomb("anna", "bert", now=0, rng=rng(), scores=only("anna"))
+        assert game.cut("bert", game.wire) == ["bert hat die Bombe entschärft. Glückwunsch!"]
+        assert game.awards == []
+
+    def test_without_scores(self) -> None:
+        game = Timebomb("anna", "bert", now=0, rng=rng())
+        assert game.cut("bert", game.wire) == ["bert hat die Bombe entschärft. Glückwunsch!"]
+        assert game.awards == []
+
+    def test_the_name_is_escaped(self) -> None:
+        game = Timebomb("anna", "<i>", now=0, rng=rng(), scores=everybody)
+        assert game.cut("<i>", game.wire)[0].endswith("Glückwunsch! &lt;i&gt; bekommt 5 Punkte!")
+
+
+class TestPointsQuiz:
+    def play(self, answers: list[str], scores: Callable[[str], bool] | None = everybody) -> tuple[Quiz, list[str]]:
+        """A quiz of len(answers) questions; each answer is the name of the one who gets it right ("" for nobody)"""
+        quiz = QuizSet("Zahlen", [Question(f"{i}?", str(i)) for i in range(len(answers))])
+        game = Quiz(quiz, True, now=0, rng=rng(), scores=scores)
+        lines: list[str] = []
+        for i, user in enumerate(answers):
+            lines = game.answer(user, game.current.answer, i) if user else game.tick(game.deadline or 0)
+        return game, lines
+
+    def test_two_points_per_right_answer(self) -> None:
+        game = Quiz(QUIZZES[0], True, now=0, rng=rng(), scores=everybody)
+        [praise, _] = game.answer("anna", "muh", 1)
+        assert praise.endswith("anna, Muh ist korrekt! anna bekommt 2 Punkte!")
+        assert game.awards == [("anna", 2)]
+
+    def test_plain_message_answers_score_too(self) -> None:
+        game = Quiz(QUIZZES[0], True, now=0, rng=rng(), scores=everybody)
+        assert game.check("anna", "muh", 1)[0].endswith("anna bekommt 2 Punkte!")
+        assert game.awards == [("anna", 2)]
+
+    def test_the_winner_gets_10_bonus_points_in_the_end_line(self) -> None:
+        game, lines = self.play(["anna", "anna", "bert"])
+        assert lines[-1] == (
+            "Das waren alle Fragen, das Quiz ist daher beendet! anna hat mit 2 richtigen Antworten gewonnen! "
+            "anna bekommt 10 Punkte!"
+        )
+        assert game.awards == [("anna", 2), ("anna", 2), ("bert", 2), ("anna", 10)]
+
+    def test_three_players_split_the_bonus(self) -> None:
+        game, lines = self.play(["anna", "bert", "cem"])
+        assert lines[-1].endswith(
+            "Gewonnen haben anna, bert, cem mit je 1 richtigen Antwort! anna, bert, cem bekommen je 3 Punkte!"
+        )
+        assert game.awards[3:] == [("anna", 3), ("bert", 3), ("cem", 3)]
+
+    def test_two_players_split_the_bonus_in_halves(self) -> None:
+        game, lines = self.play(["anna", "bert"])
+        assert lines[-1].endswith("anna, bert bekommen je 5 Punkte!")
+        assert game.awards[2:] == [("anna", 5), ("bert", 5)]
+
+    def test_case_variants_count_as_one_player(self) -> None:
+        game, lines = self.play(["anna", "Anna"])
+        assert "mit 2 richtigen Antworten" in lines[-1]
+        assert game.awards[2:] == [("Anna", 10)] or game.awards[2:] == [("anna", 10)]
+
+    def test_a_guest_winner_gets_no_bonus(self) -> None:
+        game, lines = self.play(["gast", "gast", "bert"], scores=only("bert"))
+        assert (
+            lines[-1]
+            == "Das waren alle Fragen, das Quiz ist daher beendet! gast hat mit 2 richtigen Antworten gewonnen!"
+        )
+        assert game.awards == [("bert", 2)]
+
+    def test_only_the_players_with_points_are_announced_among_equals(self) -> None:
+        game, lines = self.play(["gast", "bert"], scores=only("bert"))
+        assert lines[-1].endswith("Gewonnen haben gast, bert mit je 1 richtigen Antwort! bert bekommt 5 Punkte!")
+        assert game.awards == [("bert", 2), ("bert", 5)]
+
+    def test_nobody_right_nobody_paid(self) -> None:
+        game, lines = self.play(["", ""])
+        assert lines[-1].endswith("Leider wurde keine Frage richtig beantwortet.")
+        assert game.awards == []
+
+    def test_without_scores_the_texts_stay_plain(self) -> None:
+        game, lines = self.play(["anna"], scores=None)
+        assert (
+            lines[-1] == "Das waren alle Fragen, das Quiz ist daher beendet! anna hat mit 1 richtigen Antwort gewonnen!"
+        )
+        assert game.awards == []
+
+    def test_more_than_ten_equal_players_get_nothing(self) -> None:
+        names = [f"p{i}" for i in range(11)]
+        game, lines = self.play(names)
+        assert "bekommen" not in lines[-1] and game.awards[11:] == []
+
+
+class TestPointsHotPotato:
+    def game(self, scores: Callable[[str], bool] | None = everybody) -> HotPotato:
+        game = HotPotato("anna", now=0, rng=rng(), scores=scores)
+        game.join("bert")
+        game.join("cem")
+        return game
+
+    def test_the_last_player_gets_5_points(self) -> None:
+        game = self.game()
+        game.tick(POTATO_SIGNUP)
+        game.tick(POTATO_SIGNUP + POTATO_THROW_TIME)
+        lines = game.tick(POTATO_SIGNUP + 2 * POTATO_THROW_TIME)
+        [winner] = game.players
+        assert lines[-1] == f"{winner} hat gewonnen! {winner} bekommt 5 Punkte!"
+        assert game.awards == [(winner, 5)]
+
+    def test_everybody_left_gets_3_points_when_the_potato_is_cold(self) -> None:
+        game = self.game()
+        game.tick(POTATO_SIGNUP)
+        now = POTATO_SIGNUP
+        for _ in range(game.cold_after - 1):
+            now += 1
+            assert game.holder is not None
+            game.throw(game.holder, now)
+        assert game.holder is not None
+        assert game.throw(game.holder, now + 1) == [
+            "Die Kartoffel ist kalt! Gewonnen haben: anna, bert, cem anna, bert, cem bekommen je 3 Punkte!"
+        ]
+        assert game.awards == [("anna", 3), ("bert", 3), ("cem", 3)]
+
+    def test_only_players_with_points_are_paid_and_named(self) -> None:
+        game = self.game(scores=only("bert"))
+        game.tick(POTATO_SIGNUP)
+        game.cold_after = 1
+        assert game.holder is not None
+        assert game.throw(game.holder, POTATO_SIGNUP + 1) == [
+            "Die Kartoffel ist kalt! Gewonnen haben: anna, bert, cem bert bekommt 3 Punkte!"
+        ]
+        assert game.awards == [("bert", 3)]
+
+    def test_a_lone_winner_without_points(self) -> None:
+        game = self.game(scores=only())
+        game.tick(POTATO_SIGNUP)
+        game.tick(POTATO_SIGNUP + POTATO_THROW_TIME)
+        lines = game.tick(POTATO_SIGNUP + 2 * POTATO_THROW_TIME)
+        assert lines[-1] == f"{game.players[0]} hat gewonnen!" and game.awards == []
+
+    def test_too_few_players_nothing(self) -> None:
+        game = HotPotato("anna", now=0, rng=rng(), scores=everybody)
+        game.join("bert")
+        game.tick(POTATO_SIGNUP)
+        assert game.awards == []
+
+    def test_throwing_out_of_turn_scores_only_for_the_winner(self) -> None:
+        game = self.game()
+        game.tick(POTATO_SIGNUP)
+        holder = game.holder
+        others = [p for p in game.players if p != holder]
+        game.throw(others[0], POTATO_SIGNUP + 1)
+        assert game.awards == []
+        assert game.throw(others[1], POTATO_SIGNUP + 2)[-1] == f"{holder} hat gewonnen! {holder} bekommt 5 Punkte!"
+        assert game.awards == [(holder, 5)]

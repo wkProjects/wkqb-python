@@ -1,6 +1,7 @@
 import logging
 import random
 import time
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime, timedelta
 
@@ -10,8 +11,10 @@ from wkqb.bot import Bot, Level
 from wkqb.config import CalendarEntry, Config, ConfigError, GuestMode, parse
 from wkqb.cron import TIMEZONE
 from wkqb.events import Back, FloodWarning, Login, Logout, Message, RoomEnter, SystemMessage, Unparsed, Whisper
-from wkqb.games import HotPotato, Timebomb
+from wkqb.games import POTATO_SIGNUP, POTATO_THROW_TIME, HotPotato, Timebomb
 from wkqb.outbox import Outbox
+from wkqb.points import PointsDisabled, PointsError, Standing
+from wkqb.webkicks import MAX_MESSAGE_BYTES
 
 CONFIG = Config(
     jointext="Bin da!",
@@ -542,7 +545,7 @@ async def test_quiz() -> None:
     await bot.handle(msg("Dora", "!quiz muh"))
     answers = said(bot)
     assert answers[0] == "mäh ist leider falsch!" and answers[1].endswith("Dora, Muh ist korrekt!")
-    assert answers[2] == "Das waren alle Fragen, das Quiz ist daher beendet!"
+    assert answers[2] == "Das waren alle Fragen, das Quiz ist daher beendet! Dora hat mit 1 richtigen Antwort gewonnen!"
     assert bot.games == {}
 
 
@@ -800,3 +803,528 @@ async def test_slow_ki_regexes_are_cut_off(caplog: pytest.LogCaptureFixture) -> 
     assert time.monotonic() - started < 1
     assert said(bot) == ["Ende erkannt"]  # the next entry still gets its turn
     assert "'(a|aa)+$' war zu langsam" in caplog.text
+
+
+# -- points
+
+POINTS_URL = "http://x/api/points.php"
+
+
+class FakePoints:
+    """An in-memory Points: records the calls, and fails when told to."""
+
+    def __init__(self) -> None:
+        self.adds: list[dict[str, int]] = []
+        self.calls: list[tuple[str, object]] = []
+        self.totals: dict[str, int] = {}
+        self.error: PointsError | None = None
+        self.standings: dict[str, Standing] = {}
+        self.entries: list[Standing] = []
+        self.deleted = 3
+
+    def _check(self, call: str, arg: object) -> None:
+        self.calls.append((call, arg))
+        if self.error is not None:
+            raise self.error
+
+    async def add(self, url: str, changes: Mapping[str, int]) -> dict[str, int]:
+        assert url == POINTS_URL
+        self._check("add", dict(changes))
+        self.adds.append(dict(changes))
+        for name, change in changes.items():
+            self.totals[name] = max(0, self.totals.get(name, 0) + change)
+        return {name: self.totals[name] for name in changes}
+
+    async def standing(self, url: str, name: str) -> Standing:
+        assert url == POINTS_URL
+        self._check("standing", name)
+        return self.standings.get(name, Standing(name, 0, None))
+
+    async def toplist(self, url: str, limit: int) -> list[Standing]:
+        assert url == POINTS_URL
+        self._check("toplist", limit)
+        return self.entries
+
+    async def reset(self, url: str) -> int:
+        assert url == POINTS_URL
+        self._check("reset", None)
+        return self.deleted
+
+    async def set_active(self, url: str, active: bool) -> None:
+        assert url == POINTS_URL
+        self._check("set_active", active)
+
+
+def points_bot(data: Mapping[str, object] | None = None, *, active: bool = True) -> tuple[Bot, FakePoints, Clock]:
+    config = configured(api={"points": POINTS_URL}, points={"active": active}, **(data or {}))
+    assert config.points_api == POINTS_URL and config.points_active is active
+    points, clock = FakePoints(), Clock()
+    return Bot("wkQB", config, Outbox(), Reloader(), points=points, rng=random.Random(1), clock=clock), points, clock
+
+
+async def defuse(bot: Bot, starter: str, victim: str = "") -> list[str]:
+    await bot.handle(msg(starter, f"!zeitbombe {victim}".strip()))
+    game = bot.games["zeitbombe"]
+    assert isinstance(game, Timebomb)
+    said(bot)
+    await bot.handle(msg(victim or starter, f"!schneide {game.wire}"))
+    return said(bot)
+
+
+async def test_points_for_defusing_a_bomb() -> None:
+    bot, points, _ = points_bot()
+    assert await defuse(bot, "Emil") == ["Emil hat die Bombe entschärft. Glückwunsch! Emil bekommt 5 Punkte!"]
+    await bot.settle()
+    assert points.adds == [{"Emil": 5}]
+
+
+async def test_nothing_is_reported_before_the_game_awards_something() -> None:
+    bot, points, _ = points_bot()
+    await bot.handle(msg("Emil", "!zeitbombe"))
+    await bot.settle()
+    assert points.calls == []
+
+
+async def test_a_lost_bomb_gives_no_points() -> None:
+    bot, points, clock = points_bot()
+    await bot.handle(msg("Bert", "!zeitbombe Dora"))
+    clock.now += timedelta(seconds=30)
+    bot.tick()
+    await bot.handle(msg("Bert", "!zeitbombe Dora"))
+    await bot.handle(msg("Dora", "!cheat"))
+    await bot.settle()
+    assert points.calls == []
+
+
+async def test_hangman_points_are_reported_per_move() -> None:
+    bot, points, _ = points_bot(WORDS)
+    await bot.handle(msg("Emil", "!hangman"))
+    await bot.handle(msg("Emil", "!hangman k"))
+    await bot.handle(msg("Dora", "!hangman a"))
+    said(bot)
+    await bot.handle(msg("EMIL", "!hangman katze"))
+    assert said(bot) == ["Volltreffer EMIL, Katze ist richtig! EMIL bekommt 10 Punkte!"]
+    await bot.settle()
+    assert points.adds == [{"Emil": 1}, {"Dora": 1}, {"EMIL": 10}]
+
+
+async def test_wordmix_points() -> None:
+    bot, points, _ = points_bot(WORDS)
+    await bot.handle(msg("Emil", "!wordmix"))
+    said(bot)
+    await bot.handle(msg("Emil", "!wordmix ab"))
+    assert said(bot) == ["Volltreffer Emil, ab ist richtig! Emil bekommt 1 Punkt!"]
+    await bot.settle()
+    assert points.adds == [{"Emil": 1}]
+
+
+async def test_case_variants_of_a_name_are_merged_into_one_request() -> None:
+    quiz = {
+        "show_solution": True,
+        "quizzes": [{"name": "Z", "questions": [{"question": "1?", "answer": "a"}, {"question": "2?", "answer": "b"}]}],
+    }
+    bot, points, _ = points_bot({"quiz": quiz})
+    await bot.handle(msg("Emil", "!quiz 1"))
+    for user in ["Dora", "dora"]:
+        await bot.handle(msg(user, "a" if user == "Dora" else "b"))
+        await bot.settle()
+    assert bot.games == {}
+    # the answers are in random order, so only the sums matter
+    assert [sum(call.values()) for call in points.adds] == [2, 12]
+    assert [len(call) for call in points.adds] == [1, 1]
+
+
+async def test_quiz_answers_as_plain_messages_score() -> None:
+    bot, points, _ = points_bot(QUIZ)
+    await bot.handle(msg("Emil", "!quiz 1"))
+    said(bot)
+    await bot.handle(msg("Dora", "muh"))
+    assert said(bot)[0].endswith("Dora, Muh ist korrekt! Dora bekommt 2 Punkte!")
+    await bot.settle()
+    assert points.adds == [{"Dora": 12}]
+
+
+async def test_quiz_end_line_has_the_bonus() -> None:
+    bot, _, _ = points_bot(QUIZ)
+    await bot.handle(msg("Emil", "!quiz 1"))
+    said(bot)
+    await bot.handle(msg("Dora", "muh"))
+    assert said(bot)[1] == (
+        "Das waren alle Fragen, das Quiz ist daher beendet! Dora hat mit 1 richtigen Antwort gewonnen! "
+        "Dora bekommt 10 Punkte!"
+    )
+
+
+async def test_potato_points_by_the_ticker() -> None:
+    bot, points, clock = points_bot()
+    for user in ["Emil", "Dora", "Fritz"]:
+        await bot.handle(msg(user, "!kartoffel"))
+    said(bot)
+    clock.now += timedelta(seconds=POTATO_SIGNUP)
+    bot.tick()
+    for _ in range(2):
+        clock.now += timedelta(seconds=POTATO_THROW_TIME)
+        bot.tick()
+    assert "bekommt 5 Punkte!" in said(bot)[-1]
+    assert bot.games == {}
+    await bot.settle()
+    [call] = points.adds
+    assert list(call.values()) == [5]
+
+
+async def test_guests_get_no_points() -> None:
+    bot, points, _ = points_bot(QUIZ)
+    await bot.handle(msg("Emil", "!quiz 1"))
+    said(bot)
+    await bot.handle(msg("Gast", "muh", guest=True))
+    assert said(bot)[0].endswith("Gast, Muh ist korrekt!")
+    await bot.settle()
+    assert points.calls == []
+
+
+async def test_guests_known_from_the_login_get_no_points() -> None:
+    bot, points, _ = points_bot(QUIZ)
+    await bot.handle(Login("Gast", True, "12:34"))
+    await bot.handle(msg("Emil", "!quiz 1"))
+    said(bot)
+    await bot.handle(msg("Gast", "muh"))  # the message doesn't say it's a guest
+    assert said(bot)[0].endswith("Gast, Muh ist korrekt!")
+    await bot.settle()
+    assert points.calls == []
+
+
+async def test_guests_are_remembered_from_their_messages() -> None:
+    bot, _, _ = points_bot()
+    assert bot._scores("Gast")
+    await bot.handle(msg("Gast", "hallo", guest=True))
+    assert not bot._scores("Gast") and not bot._scores("gast") and bot._scores("Emil")
+
+
+async def test_guests_score_again_after_logout() -> None:
+    bot, _, _ = points_bot()
+    await bot.handle(Login("Gast", True, "12:34"))
+    assert not bot._scores("Gast")
+    await bot.handle(Logout("Gast", True, "12:35", False))
+    assert bot._scores("Gast")
+
+
+async def test_ignored_users_get_no_points() -> None:
+    bot, _, _ = points_bot()
+    assert not bot._scores("Spam") and not bot._scores("SPAM")
+    assert bot._scores("Cem")  # team members can't be ignored
+
+
+async def test_a_bomb_for_something_that_is_no_nick_gives_no_points() -> None:
+    bot, points, _ = points_bot()
+    assert await defuse(bot, "Bert", "Jürgen") == ["Jürgen hat die Bombe entschärft. Glückwunsch!"]
+    await bot.settle()
+    assert points.calls == []
+
+
+async def test_nothing_while_the_points_are_off() -> None:
+    bot, points, _ = points_bot(active=False)
+    assert await defuse(bot, "Emil") == ["Emil hat die Bombe entschärft. Glückwunsch!"]
+    await bot.settle()
+    assert points.calls == []
+
+
+async def test_nothing_without_an_api() -> None:
+    config = configured(points={"active": True})
+    bot = Bot("wkQB", config, Outbox(), Reloader(), points=FakePoints(), rng=random.Random(1), clock=Clock())
+    assert await defuse(bot, "Emil") == ["Emil hat die Bombe entschärft. Glückwunsch!"]
+
+
+async def test_nothing_without_a_client() -> None:
+    bot, _, _ = make(configured(api={"points": POINTS_URL}, points={"active": True}))
+    assert await defuse(bot, "Emil") == ["Emil hat die Bombe entschärft. Glückwunsch!"]
+    await bot.settle()
+
+
+async def test_points_disabled_during_a_report_switches_the_points_off() -> None:
+    bot, points, _ = points_bot()
+    points.error = PointsDisabled("off")
+    await defuse(bot, "Emil")
+    await bot.settle()
+    assert points.calls == [("add", {"Emil": 5})]
+    assert not bot.config.points_active
+    points.error = None
+    assert await defuse(bot, "Cem") == ["Cem hat die Bombe entschärft. Glückwunsch!"]
+    await bot.settle()
+    assert len(points.calls) == 1
+
+
+async def test_a_points_error_is_only_logged_and_the_game_goes_on(caplog: pytest.LogCaptureFixture) -> None:
+    bot, points, _ = points_bot(WORDS)
+    points.error = PointsError("HTTP 500")
+    await bot.handle(msg("Emil", "!hangman"))
+    await bot.handle(msg("Emil", "!hangman k"))
+    await bot.settle()
+    assert any(r.levelno == logging.WARNING and "HTTP 500" in r.getMessage() for r in caplog.records)
+    assert bot.config.points_active and "hangman" in bot.games
+    said(bot)
+    points.error = None
+    await bot.handle(msg("Emil", "!hangman katze"))
+    assert said(bot) == ["Volltreffer Emil, Katze ist richtig! Emil bekommt 10 Punkte!"]
+    await bot.settle()
+    assert points.adds == [{"Emil": 10}]
+
+
+async def test_settle_without_reports_returns_at_once() -> None:
+    bot, _, _ = make()
+    await bot.settle()
+
+
+# commands
+
+
+async def test_mypoints() -> None:
+    bot, points, _ = points_bot()
+    points.standings = {"Dora": Standing("Dora", 17, 2), "Fritz": Standing("Fritz", 1, 3)}
+    for user in ["Emil", "Dora", "Fritz"]:
+        await bot.handle(msg(user, "!mypoints"))
+    await bot.handle(Whisper("Dora", False, "12:34", "!mypoints"))
+    assert said(bot) == [
+        "Emil, du hast noch keine Punkte.",
+        "Dora, du hast 17 Punkte (Platz 2).",
+        "Fritz, du hast 1 Punkt (Platz 3).",
+        "/f Dora Dora, du hast 17 Punkte (Platz 2).",
+    ]
+    assert [call for call, _ in points.calls] == ["standing"] * 4
+
+
+async def test_mypoints_escapes_the_name() -> None:
+    bot, _, _ = points_bot()
+    await bot.handle(msg("<b>", "!mypoints"))
+    assert said(bot) == ["&lt;b&gt;, du hast noch keine Punkte."]
+
+
+async def test_toplist() -> None:
+    bot, points, _ = points_bot()
+    points.entries = [Standing("Anna", 17, 1), Standing("Bert", 17, 1), Standing("<b>", 1, 2)]
+    await bot.handle(msg("Emil", "!toplist"))
+    await bot.handle(Whisper("Emil", False, "12:34", "!toplist"))
+    assert said(bot) == [
+        "Toplist: 1. Anna (17 Punkte), 1. Bert (17 Punkte), 2. &lt;b&gt; (1 Punkt)",
+        "/f Emil Toplist: 1. Anna (17 Punkte), 1. Bert (17 Punkte), 2. &lt;b&gt; (1 Punkt)",
+    ]
+
+
+async def test_toplist_fits_into_one_message() -> None:
+    bot, points, _ = points_bot()
+    points.entries = [Standing(f"Sehr_langer_Nick_Nummer_{i:02}", 1_000_000 - i, i) for i in range(1, 21)]
+    await bot.handle(msg("Emil", "!toplist 20"))
+    await bot.handle(Whisper("Emil_mit_langem_Nick", False, "12:34", "!toplist 20"))
+    public, whispered = said(bot)
+    for line in (public, whispered):
+        assert len(line.encode()) <= MAX_MESSAGE_BYTES
+        assert line.endswith(" Punkte)")  # whole entries only
+    assert whispered.startswith("/f Emil_mit_langem_Nick Toplist: 1. Sehr_langer_Nick_Nummer_01")
+    assert 10 < whispered.count("Punkte)") <= public.count("Punkte)") < 20
+
+
+async def test_long_jointext_keeps_the_version() -> None:
+    bot, _, _ = make(replace(CONFIG, jointext="Hallo " * 200))
+    bot.connected()
+    [line] = said(bot)
+    assert line.endswith("… (wkQB 6.0, https://wkqb.de)") and len(line.encode()) <= MAX_MESSAGE_BYTES
+
+
+async def test_empty_toplist() -> None:
+    bot, _, _ = points_bot()
+    await bot.handle(msg("Emil", "!toplist"))
+    assert said(bot) == ["Leider hat noch niemand einen Punkt! :-("]
+
+
+@pytest.mark.parametrize(
+    ("param", "limit"),
+    [
+        ("", 10),
+        (" 5", 5),
+        (" 20", 20),
+        (" 21", 20),
+        (" 999999999999", 20),
+        (" 1", 1),
+        (" 0", 1),
+        (" abc", 10),
+        (" -3", 10),
+        (" 2.5", 10),
+        (" 3 foo", 3),
+        (" foo 3", 10),
+    ],
+)
+async def test_toplist_limit(param: str, limit: int) -> None:
+    bot, points, _ = points_bot()
+    await bot.handle(msg("Emil", f"!toplist{param}"))
+    assert points.calls == [("toplist", limit)]
+
+
+@pytest.mark.parametrize("text", ["!mypoints", "!toplist"])
+async def test_reading_commands_while_off_or_without_api(text: str) -> None:
+    bot, points, _ = points_bot(active=False)
+    await bot.handle(msg("Emil", text))
+    await bot.handle(Whisper("Emil", False, "12:34", text))
+    assert said(bot) == ["Das Punktesystem ist deaktiviert!", "/f Emil Das Punktesystem ist deaktiviert!"]
+    assert points.calls == []
+    bot, _, _ = make(configured())
+    await bot.handle(msg("Emil", text))
+    assert said(bot) == ["Das Punktesystem ist deaktiviert!"]
+
+
+@pytest.mark.parametrize("text", ["!mypoints", "!toplist"])
+async def test_reading_commands_without_a_client(text: str) -> None:
+    bot, _, _ = make(configured(api={"points": POINTS_URL}, points={"active": True}))
+    await bot.handle(msg("Emil", text))
+    assert said(bot) == ["Das Punktesystem ist deaktiviert!"]
+
+
+@pytest.mark.parametrize("text", ["!mypoints", "!toplist", "!modifypoints Dora 5", "!resetpoints"])
+async def test_commands_fail_gracefully_on_a_points_error(text: str, caplog: pytest.LogCaptureFixture) -> None:
+    bot, points, _ = points_bot()
+    points.error = PointsError("HTTP 500")
+    await bot.handle(msg("Anna", text))
+    await bot.handle(Whisper("Anna", False, "12:34", text))
+    assert said(bot) == ["Das hat leider nicht geklappt :-(", "/f Anna Das hat leider nicht geklappt :-("]
+    assert "HTTP 500" in caplog.text and bot.config.points_active
+
+
+async def test_pointson_and_off_fail_gracefully_on_a_points_error() -> None:
+    bot, points, _ = points_bot()
+    points.error = PointsError("HTTP 500")
+    await bot.handle(msg("Cem", "!pointsoff"))
+    assert said(bot) == ["Das hat leider nicht geklappt :-("]
+    assert bot.config.points_active
+
+
+@pytest.mark.parametrize("text", ["!mypoints", "!toplist", "!modifypoints Dora 5", "!resetpoints"])
+async def test_a_disabled_answer_switches_the_points_off(text: str) -> None:
+    bot, points, _ = points_bot()
+    points.error = PointsDisabled("off")
+    await bot.handle(msg("Anna", text))
+    assert said(bot) == ["Das Punktesystem ist deaktiviert!"]
+    assert not bot.config.points_active
+
+
+async def test_pointsoff_and_pointson() -> None:
+    bot, points, _ = points_bot()
+    await bot.handle(msg("Emil", "!pointsoff"))  # mods and up only
+    assert said(bot) == [] and bot.config.points_active and points.calls == []
+    await bot.handle(msg("Cem", "!pointsoff"))
+    assert said(bot) == ["Das Punktesystem ist nun deaktiviert!"]
+    assert not bot.config.points_active and points.calls == [("set_active", False)]
+    await bot.handle(msg("Emil", "!toplist"))
+    assert said(bot) == ["Das Punktesystem ist deaktiviert!"]
+    await bot.handle(Whisper("Bert", False, "12:34", "!pointson"))  # works while off
+    assert said(bot) == ["/f Bert Das Punktesystem ist nun aktiviert!"]
+    assert bot.config.points_active and points.calls[-1] == ("set_active", True)
+    await bot.handle(msg("Anna", "!pointson"))  # and while on
+    assert said(bot) == ["Das Punktesystem ist nun aktiviert!"]
+
+
+async def test_pointson_without_api() -> None:
+    bot, _, _ = make(configured())
+    await bot.handle(msg("Cem", "!pointson"))
+    assert said(bot) == ["Das Punktesystem ist deaktiviert!"]
+    assert not bot.config.points_active
+
+
+async def test_pointson_without_a_client() -> None:
+    bot, _, _ = make(configured(api={"points": POINTS_URL}, points={"active": False}))
+    await bot.handle(msg("Cem", "!pointson"))
+    assert said(bot) == ["Das Punktesystem ist deaktiviert!"]
+
+
+async def test_modifypoints() -> None:
+    bot, points, _ = points_bot()
+    for user in ["Emil", "Cem"]:
+        await bot.handle(msg(user, "!modifypoints Dora 5"))  # admins and up only
+    assert said(bot) == [] and points.calls == []
+    await bot.handle(msg("Bert", "!modifypoints Dora 5"))
+    await bot.handle(msg("Anna", "!modifypoints Dora +2"))
+    await bot.handle(msg("Anna", "!modifypoints Dora -1"))
+    await bot.handle(Whisper("Bert", False, "12:34", "!modifypoints dora -100"))
+    assert said(bot) == [
+        "Dem Punktekonto von Dora wurden 5 Punkte gutgeschrieben! Neuer Stand: 5 Punkte.",
+        "Dem Punktekonto von Dora wurden 2 Punkte gutgeschrieben! Neuer Stand: 7 Punkte.",
+        "Dem Punktekonto von Dora wurden 1 Punkt abgezogen! Neuer Stand: 6 Punkte.",
+        "/f Bert Dem Punktekonto von dora wurden 100 Punkte abgezogen! Neuer Stand: 0 Punkte.",
+    ]
+    assert points.adds == [{"Dora": 5}, {"Dora": 2}, {"Dora": -1}, {"dora": -100}]
+
+
+async def test_modifypoints_bounds() -> None:
+    bot, points, _ = points_bot()
+    await bot.handle(msg("Bert", "!modifypoints Dora 1000000"))
+    await bot.handle(msg("Bert", "!modifypoints Dora -1000000"))
+    assert points.adds == [{"Dora": 1_000_000}, {"Dora": -1_000_000}]
+    assert said(bot)[1].endswith("Neuer Stand: 0 Punkte.")
+
+
+@pytest.mark.parametrize(
+    "param",
+    [
+        "",
+        "Dora",
+        "5",
+        "Dora 0",
+        "Dora +0",
+        "Dora -0",
+        "Dora 1000001",
+        "Dora -1000001",
+        "Dora 12345678",
+        "Dora 99999999999999999999",
+        "Dora fünf",
+        "Dora 2.5",
+        "Dora 5 6",
+        "a b 5",
+        "a b",
+        "Jürgen 5",
+        "Dora\u0663 5",
+        "<b> 5",
+        "Dora 5x",
+        "Dora ++5",
+        "Dora 1e3",
+    ],
+)
+async def test_modifypoints_validation(param: str) -> None:
+    bot, points, _ = points_bot()
+    await bot.handle(msg("Bert", f"!modifypoints {param}"))
+    await bot.handle(Whisper("Bert", False, "12:34", f"!modifypoints {param}"))
+    usage = "So geht das: !modifypoints NAME PUNKTE (z. B. 5 oder -5)"
+    assert said(bot) == [usage, f"/f Bert {usage}"]
+    assert points.calls == []
+
+
+async def test_modifypoints_usage_has_the_command_sign() -> None:
+    bot, _, _ = points_bot({"command_sign": "#"})
+    await bot.handle(msg("Bert", "#modifypoints"))
+    assert said(bot) == ["So geht das: #modifypoints NAME PUNKTE (z. B. 5 oder -5)"]
+
+
+async def test_modifypoints_while_off() -> None:
+    bot, points, _ = points_bot(active=False)
+    await bot.handle(msg("Bert", "!modifypoints Dora 5"))
+    assert said(bot) == ["Das Punktesystem ist deaktiviert!"] and points.calls == []
+
+
+async def test_resetpoints() -> None:
+    bot, points, _ = points_bot()
+    for user in ["Emil", "Cem", "Bert"]:
+        await bot.handle(msg(user, "!resetpoints"))  # the master only
+    assert said(bot) == [] and points.calls == []
+    await bot.handle(msg("Anna", "!resetpoints"))
+    await bot.handle(Whisper("Anna", False, "12:34", "!resetpoints"))
+    assert said(bot) == ["Die Punkte wurden zurückgesetzt!", "/f Anna Die Punkte wurden zurückgesetzt!"]
+    assert points.calls == [("reset", None)] * 2
+
+
+async def test_resetpoints_while_off() -> None:
+    bot, points, _ = points_bot(active=False)
+    await bot.handle(msg("Anna", "!resetpoints"))
+    assert said(bot) == ["Das Punktesystem ist deaktiviert!"] and points.calls == []
+
+
+async def test_ignored_users_cant_use_the_point_commands() -> None:
+    bot, points, _ = points_bot()
+    for text in ["!mypoints", "!toplist", "!pointson", "!modifypoints Dora 5", "!resetpoints"]:
+        await bot.handle(msg("Spam", text))
+    assert said(bot) == [] and points.calls == []
