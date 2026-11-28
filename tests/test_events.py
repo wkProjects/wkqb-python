@@ -12,7 +12,6 @@ from wkqb.events import (
     Event,
     Login,
     Message,
-    SystemMessage,
     TimeoutWarning,
     Unparsed,
     Whisper,
@@ -27,8 +26,8 @@ T = "<FONT SIZE=-2>(23:59)</FONT> "
 
 def recorded() -> list[dict[str, Any]]:
     """Real lines of the stream (see docs/webkicks-protocol.md), with their expected events."""
-    lines = (FIXTURES / "lines-2026-11-27.jsonl").read_text(encoding="utf-8").splitlines()
-    return [json.loads(line) for line in lines]
+    files = sorted(FIXTURES.glob("lines-*.jsonl"))
+    return [json.loads(line) for path in files for line in path.read_text(encoding="utf-8").splitlines()]
 
 
 @pytest.mark.parametrize("case", recorded(), ids=lambda case: f"{case['event']}-{case['line'][40:80]}")
@@ -44,26 +43,14 @@ def test_recorded_lines_cover_all_events() -> None:
         for name, value in vars(events).items()
         if isinstance(value, type) and issubclass(value, Event) and value not in (Event, events.UserEvent)
     }
-    # not recorded yet: the nightly maintenance message, the timeout warning (from the Perl bot)
-    assert concrete - kinds == {"SystemMessage", "TimeoutWarning"}
+    # not recorded yet: the timeout warning (from the Perl bot)
+    assert concrete - kinds == {"TimeoutWarning"}
 
 
 def test_timeout_warning() -> None:
     # as the Perl bot matched it
     line = ROW.format('<b><FONT COLOR="red">Ohne weitere Eingabe erfolgt in 2 Minuten dein Timeout.</font></b>')
     assert parse_line(line) == TimeoutWarning()
-
-
-def test_system_message() -> None:
-    # from the old bot's pattern for the nightly maintenance
-    line = ROW.format(
-        '<br /><font title="WebKicks.De - Sysadmin"><b><font color="#FF0000">System-Meldung:</font>'
-        '<span class="not_reg"> Der Chat wird aufgrund des n&auml;chtlichen Wartungszyklus f&uuml;r ca. 10 Sekunden '
-        "ausfallen.</span></b><br /><br />"
-    )
-    assert parse_line(line) == SystemMessage(
-        "Der Chat wird aufgrund des nächtlichen Wartungszyklus für ca. 10 Sekunden ausfallen."
-    )
 
 
 def test_two_dice() -> None:

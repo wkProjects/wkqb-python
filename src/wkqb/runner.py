@@ -105,6 +105,10 @@ class Runner:
             started = time.monotonic()
             try:
                 end = await self._session(bot, stop)
+            except aiohttp.ClientPayloadError:
+                # the nightly maintenance cuts the stream off in the middle of the response
+                logger.info("Webkicks hat den Stream abgebrochen")
+                end = End.LOST
             except Exception as e:
                 logger.warning("Chat-Sitzung beendet: %s: %s", type(e).__name__, e)
                 end = End.LOST

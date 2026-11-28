@@ -75,6 +75,7 @@ class FakeWebkicks:
     relative_stream_url: bool = False
     streams_opened: int = 0
     _queues: list[asyncio.Queue[bytes | None]] = field(default_factory=list)
+    _abort: bool = False
     stream_connected: asyncio.Event = field(default_factory=asyncio.Event)
     config: Any = field(default_factory=dict)
     """Served as the bot's settings at /api/config.php"""
@@ -123,6 +124,11 @@ class FakeWebkicks:
 
     def close_stream(self) -> None:
         self._queues[-1].put_nowait(None)
+
+    def abort_stream(self) -> None:
+        """Drops the connection without ending the response, as the nightly maintenance does."""
+        self._abort = True
+        self.close_stream()
 
     async def wait_for_stream(self, number: int, within: float = 5.0) -> None:
         """Waits until the number-th stream is open."""
@@ -200,6 +206,11 @@ class FakeWebkicks:
         self.stream_connected.set()
         while (data := await queue.get()) is not None:
             await response.write(data)
+        if self._abort:
+            self._abort = False
+            assert request.transport is not None
+            request.transport.close()
+            return response
         await response.write_eof()
         return response
 

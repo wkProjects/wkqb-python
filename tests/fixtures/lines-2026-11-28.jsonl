@@ -1,0 +1,2 @@
+{"line": "<table border=0><tr><td valign=bottom><br /><font title=\"WebKicks.De - Sysadmin\"><b><font color=\"#FF0000\">System-Meldung:</font><span class=\"not_reg\"> Der Chat wird aufgrund des n&auml;chtlichen Wartungszyklus f&uuml;r ca. 10 Sekunden ausfallen.</span></b><br /><br /></td></tr></table>", "event": "SystemMessage", "fields": {"text": "Der Chat wird aufgrund des nächtlichen Wartungszyklus für ca. 10 Sekunden ausfallen."}}
+{"line": "<div id=\"soundcontainer\"></div>", "event": "KeepAlive", "fields": {}}

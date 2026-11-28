@@ -81,13 +81,28 @@ async def test_logs_in_again_when_the_stream_ends(fake: FakeWebkicks, runner_fac
     async with running(runner_factory()) as bot:
         await chat_started(fake)
         await until(lambda: len(fake.messages) == 1)
-        fake.close_stream()  # e.g. the nightly maintenance
+        fake.close_stream()
         await chat_started(fake, 2)
         fake.push(message("Dora", "!ping"))
         await until(lambda: len(fake.messages) == 2)
         assert not bot.task.done()  # type: ignore[union-attr]
     assert fake.logins == ["TestBot", "TestBot"]
     assert fake.messages == ["Bin da! (wkQB 6.0, https://wkqb.de)", "Pong!"]  # hello only once
+
+
+async def test_logs_in_again_after_the_nightly_maintenance(
+    fake: FakeWebkicks, runner_factory: Callable[..., Runner], caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    async with running(runner_factory()):
+        await chat_started(fake)
+        await until(lambda: len(fake.messages) == 1)
+        fake.abort_stream()  # recorded 2026-11-28: a second after the announcement, mid-response
+        await chat_started(fake, 2)
+        fake.push(message("Dora", "!ping"))
+        await until(lambda: len(fake.messages) == 2)
+    assert "Webkicks hat den Stream abgebrochen" in caplog.text
+    assert "Chat-Sitzung beendet" not in caplog.text  # no warning for something that happens every night
 
 
 async def test_logs_in_again_after_errors(fake: FakeWebkicks, runner_factory: Callable[..., Runner]) -> None:

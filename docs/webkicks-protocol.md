@@ -26,6 +26,17 @@ was logged in as the account also ends the bot's session: the stream shows `<acc
 The server closes idle keep-alive connections; a request on such a pooled connection can fail with aiohttp's
 `ServerDisconnectedError` without the server being down, so requests should be retried once.
 
+### Nightly maintenance
+
+Recorded on 2026-11-28 (the Perl bot expected it around 04:25):
+
+- 04:30:01 the stream shows `<br /><font title="WebKicks.De - Sysadmin"><b><font color="#FF0000">System-Meldung:</font><span class="not_reg"> Der Chat wird aufgrund des n&auml;chtlichen Wartungszyklus f&uuml;r ca. 10 Sekunden ausfallen.</span></b><br /><br />`
+  in the usual table row, without a time.
+- 0.1 s later the connection drops without the end of the chunked response: aiohttp raises `ClientPayloadError`
+  ("Not enough data to satisfy transfer length header"), not a normal end of the stream.
+- A new login 5.5 s later worked (sid, login, stream, later keep-alives), and other accounts kept writing.
+- After that login the stream showed no login line of the account itself (after `/exit` and a new login it does).
+
 ## Sending
 
 `POST /cgi-bin/chat.cgi` with `user`, `pass=<sid>`, `cid`, `message`:
@@ -136,7 +147,6 @@ gives the Chat-Bot-PM `Der Channel <b>ROOM</b> existiert nicht. Vertippt?`.
 
 ## Not observed yet
 
-- The nightly maintenance (announcement, how the stream ends, how long logins fail).
 - Kicks, gags, `/cls`, messages of chat admins (HTML), flood protection for chat admins/moderators.
 - Whispers to a bot by a guest, messages of a bot that is a chat admin.
 - The rate limit for normal accounts.

@@ -32,8 +32,8 @@ from wkqb import USER_AGENT
 from wkqb.recorder import Recorder
 from wkqb.webkicks import ChatUrl, Credentials, Webkicks, from_env
 
-#: Seconds without any stream data until the stream counts as dead
-READ_TIMEOUT = 900.0
+#: Webkicks sends a keep-alive every 60 seconds; three missing ones mean the stream is dead (as in the bot)
+READ_TIMEOUT = 180.0
 #: Seconds between the keep-alive requests (the old bot used 15 minutes)
 KEEPALIVE_INTERVAL = 600.0
 #: Waiting time before logging in again; doubles after every attempt up to RETRY_MAX

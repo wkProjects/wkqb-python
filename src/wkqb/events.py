@@ -244,6 +244,8 @@ def _parse(line: str) -> Event:
         return KeepAlive()
     if line == "<!-- update!! //-->":
         return ChatStarted()
+    if line == '<div id="soundcontainer"></div>':
+        return KeepAlive()  # follows the start, a placeholder for the login sound; nothing to do
     if "Connection Closed (multiple Login detected)" in line:
         return TakenOver()
 
